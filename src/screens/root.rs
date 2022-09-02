@@ -52,7 +52,7 @@ impl TrackedWindow for RootWindow {
                     .pick_file();
                 if let Some(file) = file {
                     println!("You picked {:?}", file.display());
-                    Debugger::start_process(file);
+                    c.debugger = Some(Debugger::start_process(file));
                 }
             }
         });

@@ -14,9 +14,87 @@ use windows::{
     },
 };
 
-pub struct Debugger {}
+use super::{DebuggerChannels, MessageFromDebugger, MessageToDebugger};
+
+pub struct Debugger {
+    info: PROCESS_INFORMATION,
+    recvr: std::sync::mpsc::Receiver<MessageToDebugger>,
+    sndr: std::sync::mpsc::Sender<MessageFromDebugger>,
+}
 
 impl Debugger {
+    fn new(
+        recvr: std::sync::mpsc::Receiver<MessageToDebugger>,
+        sndr: std::sync::mpsc::Sender<MessageFromDebugger>,
+    ) -> Self {
+        Self {
+            info: PROCESS_INFORMATION::default(),
+            recvr: recvr,
+            sndr: sndr,
+        }
+    }
+
+    fn debug_loop(&mut self) {
+        let mut lpdebugevent = DEBUG_EVENT::default();
+        let mut should_exit = false;
+        loop {
+            let r = unsafe {
+                windows::Win32::System::Diagnostics::Debug::WaitForDebugEvent(
+                    &mut lpdebugevent,
+                    0xFFFFFFFF,
+                )
+            };
+            if r.as_bool() {
+                let mut cont_code = windows::Win32::Foundation::DBG_CONTINUE.0 as u32;
+                match lpdebugevent.dwDebugEventCode {
+                    Debug::CREATE_PROCESS_DEBUG_EVENT => {
+                        println!("Process created");
+                    }
+                    Debug::LOAD_DLL_DEBUG_EVENT => {
+                        let event = unsafe { lpdebugevent.u.LoadDll };
+                        println!("DLL Load event {:x?}", event.lpBaseOfDll);
+                    }
+                    Debug::UNLOAD_DLL_DEBUG_EVENT => {
+                        println!("DLL Unload event");
+                    }
+                    Debug::CREATE_THREAD_DEBUG_EVENT => {
+                        println!("Thread creation event");
+                    }
+                    Debug::EXIT_THREAD_DEBUG_EVENT => {
+                        println!("Thread exit event");
+                    }
+                    Debug::EXIT_PROCESS_DEBUG_EVENT => {
+                        if lpdebugevent.dwProcessId == self.info.dwProcessId {
+                            should_exit = true;
+                            println!("Process exit event for main process");
+                        } else {
+                            println!("Other process exit event");
+                        }
+                    }
+                    _ => {
+                        println!("Received a debug event {:?}", lpdebugevent.dwDebugEventCode);
+                    }
+                }
+                if !should_exit {
+                    unsafe {
+                        windows::Win32::System::Diagnostics::Debug::ContinueDebugEvent(
+                            lpdebugevent.dwProcessId,
+                            lpdebugevent.dwThreadId,
+                            cont_code,
+                        );
+                    }
+                } else {
+                    break;
+                }
+            } else {
+                let err = unsafe { windows::Win32::Foundation::GetLastError() };
+                println!("The error for waitfordebugevent is {:?}", err);
+                return;
+            }
+        }
+        println!("Done debugging process");
+    }
+
     fn thread_start_process(&mut self, p: PathBuf) {
         let mut p2 = p.clone();
         p2.pop();
@@ -62,7 +140,6 @@ impl Debugger {
             hStdOutput: outp,
             hStdError: errp,
         };
-        let mut info: PROCESS_INFORMATION = PROCESS_INFORMATION::default();
         let response = unsafe {
             windows::Win32::System::Threading::CreateProcessA(
                 PCSTR(path.as_ptr() as *const u8),
@@ -74,7 +151,7 @@ impl Debugger {
                 envflags,
                 PCSTR(curdir.as_ptr() as *const u8),
                 &start,
-                &mut info,
+                &mut self.info,
             )
         };
         println!("Response of createprocess is {}", response.as_bool());
@@ -84,71 +161,20 @@ impl Debugger {
             return;
         }
 
-        let mut lpdebugevent = DEBUG_EVENT::default();
-
-        let mut should_exit = false;
-        loop {
-            let r = unsafe {
-                windows::Win32::System::Diagnostics::Debug::WaitForDebugEvent(
-                    &mut lpdebugevent,
-                    0xFFFFFFFF,
-                )
-            };
-            if r.as_bool() {
-                let mut cont_code = windows::Win32::Foundation::DBG_CONTINUE.0 as u32;
-                match lpdebugevent.dwDebugEventCode {
-                    Debug::CREATE_PROCESS_DEBUG_EVENT => {
-                        println!("Process created");
-                    }
-                    Debug::LOAD_DLL_DEBUG_EVENT => {
-                        let event = unsafe { lpdebugevent.u.LoadDll };
-                        println!("DLL Load event {:x?}", event.lpBaseOfDll);
-                    }
-                    Debug::UNLOAD_DLL_DEBUG_EVENT => {
-                        println!("DLL Unload event");
-                    }
-                    Debug::CREATE_THREAD_DEBUG_EVENT => {
-                        println!("Thread creation event");
-                    }
-                    Debug::EXIT_THREAD_DEBUG_EVENT => {
-                        println!("Thread exit event");
-                    }
-                    Debug::EXIT_PROCESS_DEBUG_EVENT => {
-                        if lpdebugevent.dwProcessId == info.dwProcessId {
-                            should_exit = true;
-                            println!("Process exit event for main process");
-                        } else {
-                            println!("Other process exit event");
-                        }
-                    }
-                    _ => {
-                        println!("Received a debug event {:?}", lpdebugevent.dwDebugEventCode);
-                    }
-                }
-                if !should_exit {
-                    unsafe {
-                        windows::Win32::System::Diagnostics::Debug::ContinueDebugEvent(
-                            lpdebugevent.dwProcessId,
-                            lpdebugevent.dwThreadId,
-                            cont_code,
-                        );
-                    }
-                } else {
-                    break;
-                }
-            } else {
-                let err = unsafe { windows::Win32::Foundation::GetLastError() };
-                println!("The error for waitfordebugevent is {:?}", err);
-                return;
-            }
-        }
-        println!("Done debugging process");
+        self.debug_loop();
     }
 
-    pub fn start_process(p: PathBuf) {
+    pub fn start_process(p: PathBuf) -> DebuggerChannels {
+        let (to_debugger, from_app) = std::sync::mpsc::channel();
+        let (to_app, from_debugger) = std::sync::mpsc::channel();
+
         std::thread::spawn(move || {
-            let mut d = Debugger {};
+            let mut d = Debugger::new(from_app, to_app);
             d.thread_start_process(p);
         });
+        DebuggerChannels {
+            sndr: to_debugger,
+            rcvr: from_debugger,
+        }
     }
 }
