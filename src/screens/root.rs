@@ -45,6 +45,16 @@ impl TrackedWindow for RootWindow {
 
         let mut windows_to_create = vec![];
 
+        egui::TopBottomPanel::top("menubar")
+            .show(&egui.egui_ctx, |ui| if ui.button("📂").clicked() {
+                let file = rfd::FileDialog::new()
+                    .add_filter("executables", &["exe"])
+                    .pick_file();
+                if let Some(file) = file {
+                    println!("You picked {:?}", file.display());
+                }
+            });
+
         egui::SidePanel::left("my_side_panel").show(&egui.egui_ctx, |ui| {
             ui.heading("Hello World!");
             if ui.button("New popup").clicked() {
