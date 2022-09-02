@@ -4,7 +4,7 @@ use egui_multiwin::{
     tracked_window::{RedrawResponse, TrackedWindow},
 };
 
-use crate::AppCommon;
+use crate::{debug::Debugger, AppCommon};
 
 use super::popup_window::PopupWindow;
 
@@ -45,15 +45,17 @@ impl TrackedWindow for RootWindow {
 
         let mut windows_to_create = vec![];
 
-        egui::TopBottomPanel::top("menubar")
-            .show(&egui.egui_ctx, |ui| if ui.button("📂").clicked() {
+        egui::TopBottomPanel::top("menubar").show(&egui.egui_ctx, |ui| {
+            if ui.button("📂").clicked() {
                 let file = rfd::FileDialog::new()
                     .add_filter("executables", &["exe"])
                     .pick_file();
                 if let Some(file) = file {
                     println!("You picked {:?}", file.display());
+                    Debugger::start_process(file);
                 }
-            });
+            }
+        });
 
         egui::SidePanel::left("my_side_panel").show(&egui.egui_ctx, |ui| {
             ui.heading("Hello World!");

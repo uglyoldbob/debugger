@@ -1,5 +1,6 @@
 use egui_multiwin::multi_window::MultiWindow;
 
+mod debug;
 mod screens;
 
 use screens::root::{self};
