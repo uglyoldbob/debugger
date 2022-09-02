@@ -63,6 +63,9 @@ impl Debugger {
                     Debug::EXIT_THREAD_DEBUG_EVENT => {
                         println!("Thread exit event");
                     }
+                    Debug::EXCEPTION_DEBUG_EVENT => {
+                        println!("Exception in debugging");
+                    }
                     Debug::EXIT_PROCESS_DEBUG_EVENT => {
                         if lpdebugevent.dwProcessId == self.info.dwProcessId {
                             should_exit = true;

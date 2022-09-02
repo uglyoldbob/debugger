@@ -15,9 +15,9 @@ fn main() {
     let mut multi_window = MultiWindow::new();
     let root_window = root::RootWindow::new();
 
-    let ac = AppCommon { 
+    let ac = AppCommon {
         clicks: 0,
-        debugger: None, 
+        debugger: None,
     };
 
     let _e = multi_window.add(root_window, &event_loop);
