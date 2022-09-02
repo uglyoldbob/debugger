@@ -1,16 +1,15 @@
-pub mod multi_window;
-pub mod tracked_window;
-pub mod windows;
+use egui_multiwin::multi_window::MultiWindow;
 
-#[macro_use]
-extern crate enum_dispatch;
+mod screens;
 
-use multi_window::MultiWindow;
-
-use windows::{
+use screens::{
     popup_window,
     root::{self},
 };
+
+pub struct AppCommon {
+    clicks: u32,
+}
 
 fn main() {
     let event_loop = glutin::event_loop::EventLoopBuilder::with_user_event().build();
@@ -18,7 +17,9 @@ fn main() {
     let root_window = root::RootWindow::new();
     let root_window2 = popup_window::PopupWindow::new("initial popup".to_string());
 
+    let ac = AppCommon { clicks: 0 };
+
     let _e = multi_window.add(root_window, &event_loop);
     let _e = multi_window.add(root_window2, &event_loop);
-    MultiWindow::run(multi_window, event_loop);
+    multi_window.run(event_loop, ac);
 }

@@ -1,21 +1,21 @@
-use crate::{
-    multi_window::NewWindowRequest,
-    tracked_window::{TrackedWindow, TrackedWindowResponse},
-};
 use egui_glow::EguiGlow;
-use glutin::PossiblyCurrent;
+use egui_multiwin::{
+    multi_window::NewWindowRequest,
+    tracked_window::{RedrawResponse, TrackedWindow},
+};
+
+use crate::AppCommon;
 
 pub struct PopupWindow {
     pub input: String,
 }
 
 impl PopupWindow {
-    pub fn new(label: String) -> NewWindowRequest {
+    pub fn new(label: String) -> NewWindowRequest<AppCommon> {
         NewWindowRequest {
-            window_state: PopupWindow {
+            window_state: Box::new(PopupWindow {
                 input: label.clone(),
-            }
-            .into(),
+            }),
             builder: glutin::window::WindowBuilder::new()
                 .with_resizable(false)
                 .with_inner_size(glutin::dpi::LogicalSize {
@@ -28,16 +28,14 @@ impl PopupWindow {
 }
 
 impl TrackedWindow for PopupWindow {
-    fn redraw(
-        &mut self,
-        egui: &mut EguiGlow,
-        _gl_window: &mut glutin::WindowedContext<PossiblyCurrent>,
-    ) -> TrackedWindowResponse {
+    type Data = AppCommon;
+
+    fn redraw(&mut self, c: &mut Self::Data, egui: &mut EguiGlow) -> RedrawResponse<Self::Data> {
         let mut quit = false;
 
         egui::CentralPanel::default().show(&egui.egui_ctx, |ui| {
             if ui.button("Increment").clicked() {
-                //TODO
+                c.clicks += 1;
             }
             let response = ui.add(egui::TextEdit::singleline(&mut self.input));
             if response.changed() {
@@ -50,7 +48,7 @@ impl TrackedWindow for PopupWindow {
                 quit = true;
             }
         });
-        TrackedWindowResponse {
+        RedrawResponse {
             quit: quit,
             new_windows: Vec::new(),
         }

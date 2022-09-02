@@ -1,26 +1,25 @@
-use crate::tracked_window::TrackedWindowResponse;
-use crate::{
-    multi_window::NewWindowRequest, tracked_window::TrackedWindow,
-    windows::popup_window::PopupWindow,
-};
 use egui_glow::EguiGlow;
-use glutin::PossiblyCurrent;
+use egui_multiwin::{
+    multi_window::NewWindowRequest,
+    tracked_window::{RedrawResponse, TrackedWindow},
+};
+
+use crate::AppCommon;
+
+use super::popup_window::PopupWindow;
 
 pub struct RootWindow {
     pub button_press_count: u32,
     pub num_popups_created: u32,
-    root: bool,
 }
 
 impl RootWindow {
-    pub fn new() -> NewWindowRequest {
+    pub fn new() -> NewWindowRequest<AppCommon> {
         NewWindowRequest {
-            window_state: RootWindow {
+            window_state: Box::new(RootWindow {
                 button_press_count: 0,
                 num_popups_created: 0,
-                root: true,
-            }
-            .into(),
+            }),
             builder: glutin::window::WindowBuilder::new()
                 .with_resizable(true)
                 .with_inner_size(glutin::dpi::LogicalSize {
@@ -33,18 +32,18 @@ impl RootWindow {
 }
 
 impl TrackedWindow for RootWindow {
+    type Data = AppCommon;
+
     fn is_root(&self) -> bool {
-        self.root
+        true
     }
 
-    fn redraw(
-        &mut self,
-        egui: &mut EguiGlow,
-        _gl_window: &mut glutin::WindowedContext<PossiblyCurrent>,
-    ) -> TrackedWindowResponse {
+    fn set_root(&mut self, _root: bool) {}
+
+    fn redraw(&mut self, c: &mut AppCommon, egui: &mut EguiGlow) -> RedrawResponse<Self::Data> {
         let mut quit = false;
 
-        let mut windows_to_create = Vec::new();
+        let mut windows_to_create = vec![];
 
         egui::SidePanel::left("my_side_panel").show(&egui.egui_ctx, |ui| {
             ui.heading("Hello World!");
@@ -60,19 +59,9 @@ impl TrackedWindow for RootWindow {
             }
         });
         egui::CentralPanel::default().show(&egui.egui_ctx, |ui| {
-            ui.heading(format!("number {}", self.button_press_count));
-
-            /*
-            for window in other_windows {
-                match window {
-                    MyWindows::Popup(popup_window) => {
-                        ui.add(egui::TextEdit::singleline(&mut popup_window.input));
-                    }
-                    _ => (),
-                }
-            }*/
+            ui.heading(format!("number {}", c.clicks));
         });
-        TrackedWindowResponse {
+        RedrawResponse {
             quit: quit,
             new_windows: windows_to_create,
         }
