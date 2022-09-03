@@ -18,8 +18,38 @@ use super::{DebuggerChannels, MessageFromDebugger, MessageToDebugger};
 
 pub struct Debugger {
     info: PROCESS_INFORMATION,
+    is64: Option<bool>,
     recvr: std::sync::mpsc::Receiver<MessageToDebugger>,
     sndr: std::sync::mpsc::Sender<MessageFromDebugger>,
+}
+
+struct WorkingSetEntry {
+    address: usize,
+    shareable: bool,
+    sharecount: u8,
+    flags: u8,
+}
+
+impl WorkingSetEntry {
+    fn is_readable(&self) -> bool {
+        (self.flags & 1) != 0
+    }
+
+    fn is_executable(&self) -> bool {
+        (self.flags & 2) != 0
+    }
+
+    fn is_writable(&self) -> bool {
+        (self.flags & 4) != 0
+    }
+
+    fn is_non_cacheable(&self) -> bool {
+        (self.flags & 8) != 0
+    }
+
+    fn is_guard_page(&self) -> bool {
+        (self.flags & 16) != 0
+    }
 }
 
 impl Debugger {
@@ -29,9 +59,102 @@ impl Debugger {
     ) -> Self {
         Self {
             info: PROCESS_INFORMATION::default(),
+            is64: None,
             recvr: recvr,
             sndr: sndr,
         }
+    }
+
+    fn is_64_bit_process(&mut self) -> Option<bool> {
+        let mut process: windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE =
+            windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE::default();
+        let mut native: windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE =
+            windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE::default();
+        let res = unsafe {
+            windows::Win32::System::Threading::IsWow64Process2(
+                self.info.hProcess,
+                &mut process as *mut windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE,
+                &mut native as *mut windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE,
+            )
+        };
+        if res.as_bool() {
+            match process {
+                windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_UNKNOWN => {
+                    match native {
+                        windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_UNKNOWN => {
+                            None
+                        }
+                        windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_I386
+                        | windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_ARM => {
+                            Some(false)
+                        }
+                        windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_IA64
+                        | windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_AMD64
+                        | windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_ARM64 => {
+                            Some(true)
+                        }
+                        _ => None,
+                    }
+                }
+                windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_I386
+                | windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_ARM => Some(false),
+                windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_IA64
+                | windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_AMD64
+                | windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_ARM64 => Some(true),
+                _ => None,
+            }
+        } else {
+            let err = unsafe { windows::Win32::Foundation::GetLastError() };
+            None
+        }
+    }
+
+    fn query_working_set(&mut self) -> Result<Vec<WorkingSetEntry>, u32> {
+        let mut pv: Vec<usize> = Vec::with_capacity(8);
+        for _ in 0..8 {
+            pv.push(0);
+        }
+        let a = pv.as_mut_ptr() as *mut c_void;
+        let res = unsafe {
+            windows::Win32::System::ProcessStatus::K32QueryWorkingSet(self.info.hProcess, a, 8)
+        };
+        let pv = if res.as_bool() {
+            println!("Success queryworkingset");
+            Ok(pv)
+        } else {
+            let err = unsafe { windows::Win32::Foundation::GetLastError() };
+            if err == windows::Win32::Foundation::ERROR_BAD_LENGTH {
+                let len = pv[0] + 1;
+                pv.resize(len, 0);
+                let a = pv.as_mut_ptr() as *mut c_void;
+                let res = unsafe {
+                    windows::Win32::System::ProcessStatus::K32QueryWorkingSet(
+                        self.info.hProcess,
+                        a,
+                        (mem::size_of::<usize>() * len) as u32,
+                    )
+                };
+                if res.as_bool() {
+                    println!("Success queryworkingset {:?}", pv);
+                    Ok(pv)
+                } else {
+                    Err(err.0)
+                }
+            } else {
+                println!("The error for queryworkingset is {:?} {:?}", err, pv);
+                Err(err.0)
+            }
+        };
+        pv.map(|e| {
+            e.iter()
+                .map(|v| WorkingSetEntry {
+                    address: *v & !0xFFF,
+                    shareable: (*v & 0x100) != 0,
+                    sharecount: ((*v >> 5) & 7) as u8,
+                    flags: (*v & 0x1f) as u8,
+                })
+                .collect()
+        })
     }
 
     fn debug_loop(&mut self) {
@@ -49,6 +172,20 @@ impl Debugger {
                 match lpdebugevent.dwDebugEventCode {
                     Debug::CREATE_PROCESS_DEBUG_EVENT => {
                         println!("Process created");
+                        self.is64 = self.is_64_bit_process();
+                        if let Some(is64) = self.is64 {
+                            if is64 {
+                                println!("Remote process is 64 bit");
+                            } else {
+                                println!("Remote process is 32 bit");
+                            }
+                        }
+                        let v = self.query_working_set();
+                        if let Ok(r) = v {
+                            for e in r {
+                                println!("Address 0x{:x} is 0x{:x}", e.address, e.flags);
+                            }
+                        }
                     }
                     Debug::LOAD_DLL_DEBUG_EVENT => {
                         let event = unsafe { lpdebugevent.u.LoadDll };
