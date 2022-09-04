@@ -19,10 +19,12 @@ use super::{DebuggerChannels, MessageFromDebugger, MessageToDebugger};
 pub struct Debugger {
     info: PROCESS_INFORMATION,
     is64: Option<bool>,
+    memory_map: Result<Vec<WorkingSetEntry>, u32>,
     recvr: std::sync::mpsc::Receiver<MessageToDebugger>,
     sndr: std::sync::mpsc::Sender<MessageFromDebugger>,
 }
 
+#[derive(Clone)]
 struct WorkingSetEntry {
     address: usize,
     shareable: bool,
@@ -50,6 +52,10 @@ impl WorkingSetEntry {
     fn is_guard_page(&self) -> bool {
         (self.flags & 16) != 0
     }
+
+    fn is_noaccess(&self) -> bool {
+        (self.flags & !8) == 0
+    }
 }
 
 impl Debugger {
@@ -62,6 +68,7 @@ impl Debugger {
             is64: None,
             recvr: recvr,
             sndr: sndr,
+            memory_map: Err(0),
         }
     }
 
@@ -77,7 +84,7 @@ impl Debugger {
                 &mut native as *mut windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE,
             )
         };
-        if res.as_bool() {
+        self.is64 = if res.as_bool() {
             match process {
                 windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_UNKNOWN => {
                     match native {
@@ -106,20 +113,22 @@ impl Debugger {
         } else {
             let err = unsafe { windows::Win32::Foundation::GetLastError() };
             None
-        }
+        };
+        self.is64
     }
 
-    fn query_working_set(&mut self) -> Result<Vec<WorkingSetEntry>, u32> {
+    fn query_working_set(&mut self) {
         let mut pv: Vec<usize> = Vec::with_capacity(8);
-        for _ in 0..8 {
-            pv.push(0);
-        }
+        pv.resize(4, 0);
         let a = pv.as_mut_ptr() as *mut c_void;
         let res = unsafe {
-            windows::Win32::System::ProcessStatus::K32QueryWorkingSet(self.info.hProcess, a, 8)
+            windows::Win32::System::ProcessStatus::K32QueryWorkingSet(
+                self.info.hProcess,
+                a,
+                (mem::size_of::<usize>() * 4) as u32,
+            )
         };
         let pv = if res.as_bool() {
-            println!("Success queryworkingset");
             Ok(pv)
         } else {
             let err = unsafe { windows::Win32::Foundation::GetLastError() };
@@ -135,17 +144,16 @@ impl Debugger {
                     )
                 };
                 if res.as_bool() {
-                    println!("Success queryworkingset {:?}", pv);
                     Ok(pv)
                 } else {
+                    let err = unsafe { windows::Win32::Foundation::GetLastError() };
                     Err(err.0)
                 }
             } else {
-                println!("The error for queryworkingset is {:?} {:?}", err, pv);
                 Err(err.0)
             }
         };
-        pv.map(|e| {
+        let p = pv.map(|e| {
             e.iter()
                 .map(|v| WorkingSetEntry {
                     address: *v & !0xFFF,
@@ -154,7 +162,8 @@ impl Debugger {
                     flags: (*v & 0x1f) as u8,
                 })
                 .collect()
-        })
+        });
+        self.memory_map = p;
     }
 
     fn debug_loop(&mut self) {
@@ -169,21 +178,22 @@ impl Debugger {
             };
             if r.as_bool() {
                 let mut cont_code = windows::Win32::Foundation::DBG_CONTINUE.0 as u32;
+                self.query_working_set();
+                if let Err(e) = &self.memory_map {
+                    println!("No memory map data present error {}", e);
+                }
                 match lpdebugevent.dwDebugEventCode {
                     Debug::CREATE_PROCESS_DEBUG_EVENT => {
+                        if self.sndr.send(MessageFromDebugger::ProcessStarted).is_err() {
+                            should_exit = true;
+                        }
                         println!("Process created");
-                        self.is64 = self.is_64_bit_process();
+                        self.is_64_bit_process();
                         if let Some(is64) = self.is64 {
                             if is64 {
                                 println!("Remote process is 64 bit");
                             } else {
                                 println!("Remote process is 32 bit");
-                            }
-                        }
-                        let v = self.query_working_set();
-                        if let Ok(r) = v {
-                            for e in r {
-                                println!("Address 0x{:x} is 0x{:x}", e.address, e.flags);
                             }
                         }
                     }
