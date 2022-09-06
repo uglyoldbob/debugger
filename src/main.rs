@@ -5,9 +5,14 @@ mod screens;
 
 use screens::root::{self};
 
+pub struct Windows {}
+
+#[cfg(all(target_os = "windows", target_arch = "x86_64"))]
+type LocalMachine = Windows;
+
 pub struct AppCommon {
     clicks: u32,
-    debugger: Option<debug::DebuggerChannels>,
+    debugger: Option<Box<debug::DebuggedMachine>>,
 }
 
 fn main() {

@@ -14,14 +14,21 @@ use windows::{
     },
 };
 
-use super::{DebuggerChannels, MessageFromDebugger, MessageToDebugger};
+use static_assertions::const_assert;
 
-pub struct Debugger {
-    info: PROCESS_INFORMATION,
-    is64: Option<bool>,
-    memory_map: Result<Vec<WorkingSetEntry>, u32>,
-    recvr: std::sync::mpsc::Receiver<MessageToDebugger>,
-    sndr: std::sync::mpsc::Sender<MessageFromDebugger>,
+const_assert!(std::mem::size_of::<MessageToDebugger>() < 10);
+const_assert!(std::mem::size_of::<MessageFromDebugger>() < 10);
+
+#[cfg(target_os = "windows")]
+pub type DebuggedMachine = dyn crate::debug::Debugger<Registers = X86Registers, ThreadId = u32>;
+
+pub enum MessageToDebugger {
+    Pause,
+}
+
+pub enum MessageFromDebugger {
+    ProcessStarted,
+    Paused,
 }
 
 #[derive(Clone)]
@@ -58,7 +65,45 @@ impl WorkingSetEntry {
     }
 }
 
-impl Debugger {
+pub struct Registers32 {}
+
+pub struct Registers64 {}
+
+pub enum X86Registers {
+    Bits32(Registers32),
+    Bits64(Registers64),
+}
+
+pub struct DebuggerWindowsGui {}
+
+impl crate::debug::Debugger for DebuggerWindowsGui {
+    type Registers = X86Registers;
+    type ThreadId = u32;
+
+    fn get_main_thread(&mut self) -> Self::ThreadId {
+        0
+    }
+
+    fn get_extra_threads(&mut self) -> Vec<Self::ThreadId> {
+        (1..8).collect()
+    }
+
+    fn get_registers(&mut self, id: Self::ThreadId) -> Option<&Self::Registers> {
+        None
+    }
+
+    fn set_registers(&mut self, id: Self::ThreadId, r: &Self::Registers) {}
+}
+
+pub struct DebuggerWindows {
+    info: PROCESS_INFORMATION,
+    is64: Option<bool>,
+    memory_map: Result<Vec<WorkingSetEntry>, u32>,
+    recvr: std::sync::mpsc::Receiver<MessageToDebugger>,
+    sndr: std::sync::mpsc::Sender<MessageFromDebugger>,
+}
+
+impl DebuggerWindows {
     fn new(
         recvr: std::sync::mpsc::Receiver<MessageToDebugger>,
         sndr: std::sync::mpsc::Sender<MessageFromDebugger>,
@@ -164,6 +209,10 @@ impl Debugger {
                 .collect()
         });
         self.memory_map = p;
+    }
+
+    fn get_thread_context(&mut self) -> u32 {
+        42
     }
 
     fn debug_loop(&mut self) {
@@ -314,17 +363,14 @@ impl Debugger {
         self.debug_loop();
     }
 
-    pub fn start_process(p: PathBuf) -> DebuggerChannels {
+    pub fn start_process(p: PathBuf) -> Box<DebuggedMachine> {
         let (to_debugger, from_app) = std::sync::mpsc::channel();
         let (to_app, from_debugger) = std::sync::mpsc::channel();
 
         std::thread::spawn(move || {
-            let mut d = Debugger::new(from_app, to_app);
+            let mut d = DebuggerWindows::new(from_app, to_app);
             d.thread_start_process(p);
         });
-        DebuggerChannels {
-            sndr: to_debugger,
-            rcvr: from_debugger,
-        }
+        Box::new(DebuggerWindowsGui {})
     }
 }
