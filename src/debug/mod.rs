@@ -4,10 +4,15 @@ pub mod debug_windows;
 #[cfg(target_os = "windows")]
 pub use debug_windows::*;
 
+pub enum DebuggerState {
+    Paused,
+    Running,
+}
 pub trait Debugger {
     type Registers;
     type ThreadId;
 
+    fn process_debugger(&mut self);
     fn get_registers(&mut self, id: Self::ThreadId) -> Option<&Self::Registers>;
     fn set_registers(&mut self, id: Self::ThreadId, r: &Self::Registers);
     fn get_main_thread(&mut self) -> Self::ThreadId;
@@ -19,4 +24,5 @@ pub trait Debugger {
         vd.append(&mut others);
         vd
     }
+    fn get_state(&mut self) -> DebuggerState;
 }

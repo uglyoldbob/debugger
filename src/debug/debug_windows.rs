@@ -16,6 +16,8 @@ use windows::{
 
 use static_assertions::const_assert;
 
+use super::DebuggerState;
+
 const_assert!(std::mem::size_of::<MessageToDebugger>() < 10);
 const_assert!(std::mem::size_of::<MessageFromDebugger>() < 10);
 
@@ -74,11 +76,27 @@ pub enum X86Registers {
     Bits64(Registers64),
 }
 
-pub struct DebuggerWindowsGui {}
+pub struct DebuggerWindowsGui {
+    recvr: std::sync::mpsc::Receiver<MessageFromDebugger>,
+    sndr: std::sync::mpsc::Sender<MessageToDebugger>,
+}
 
 impl crate::debug::Debugger for DebuggerWindowsGui {
     type Registers = X86Registers;
     type ThreadId = u32;
+
+    fn process_debugger(&mut self) {
+        for e in self.recvr.try_iter() {
+            match e {
+                ProcessStarted => {}
+                Paused => {}
+            }
+        }
+    }
+
+    fn get_state(&mut self) -> DebuggerState {
+        DebuggerState::Paused
+    }
 
     fn get_main_thread(&mut self) -> Self::ThreadId {
         0
@@ -371,6 +389,9 @@ impl DebuggerWindows {
             let mut d = DebuggerWindows::new(from_app, to_app);
             d.thread_start_process(p);
         });
-        Box::new(DebuggerWindowsGui {})
+        Box::new(DebuggerWindowsGui {
+            recvr: from_debugger,
+            sndr: to_debugger,
+        })
     }
 }

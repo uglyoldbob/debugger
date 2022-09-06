@@ -124,7 +124,14 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                         });
                 });
             egui::CentralPanel::default().show(&egui.egui_ctx, |ui| {
-                ui.heading(format!("number {}", c.clicks));
+                match (*d).get_state() {
+                    crate::debug::DebuggerState::Paused => {
+                        ui.label("Program is paused");
+                    }
+                    crate::debug::DebuggerState::Running => {
+                        ui.label("Program is running");
+                    }
+                }
             });
         } else {
             egui::CentralPanel::default().show(&egui.egui_ctx, |ui| {});
