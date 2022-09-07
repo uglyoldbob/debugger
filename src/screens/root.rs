@@ -62,10 +62,11 @@ impl TrackedWindow for RootWindow<crate::Windows> {
         });
 
         if let Some(d) = &mut c.debugger {
+            (*d).process_debugger();
             egui::TopBottomPanel::top("Command bar").show(&egui.egui_ctx, |ui| {
                 let r = ui.button("▶");
                 if r.clicked() {
-                    println!("The continue button was pressed");
+                    (*d).resume_all_threads();
                 }
             });
 
@@ -123,14 +124,12 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                                 });
                         });
                 });
-            egui::CentralPanel::default().show(&egui.egui_ctx, |ui| {
-                match (*d).get_state() {
-                    crate::debug::DebuggerState::Paused => {
-                        ui.label("Program is paused");
-                    }
-                    crate::debug::DebuggerState::Running => {
-                        ui.label("Program is running");
-                    }
+            egui::CentralPanel::default().show(&egui.egui_ctx, |ui| match (*d).get_state() {
+                crate::debug::DebuggerState::Paused => {
+                    ui.label("Program is paused");
+                }
+                crate::debug::DebuggerState::Running => {
+                    ui.label("Program is running");
                 }
             });
         } else {

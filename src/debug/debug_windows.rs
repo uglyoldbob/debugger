@@ -26,11 +26,13 @@ pub type DebuggedMachine = dyn crate::debug::Debugger<Registers = X86Registers, 
 
 pub enum MessageToDebugger {
     Pause,
+    Continue,
 }
 
 pub enum MessageFromDebugger {
     ProcessStarted,
     Paused,
+    Running,
 }
 
 #[derive(Clone)]
@@ -79,6 +81,7 @@ pub enum X86Registers {
 pub struct DebuggerWindowsGui {
     recvr: std::sync::mpsc::Receiver<MessageFromDebugger>,
     sndr: std::sync::mpsc::Sender<MessageToDebugger>,
+    state: DebuggerState,
 }
 
 impl crate::debug::Debugger for DebuggerWindowsGui {
@@ -88,14 +91,25 @@ impl crate::debug::Debugger for DebuggerWindowsGui {
     fn process_debugger(&mut self) {
         for e in self.recvr.try_iter() {
             match e {
-                ProcessStarted => {}
-                Paused => {}
+                MessageFromDebugger::ProcessStarted => {}
+                MessageFromDebugger::Paused => {
+                    self.state = DebuggerState::Paused;
+                }
+                MessageFromDebugger::Running => {
+                    self.state = DebuggerState::Running;
+                }
             }
         }
     }
 
+    fn resume_all_threads(&mut self) {
+        if let Err(e) = self.sndr.send(MessageToDebugger::Continue) {
+            println!("Error {:?} sending continue event to debugger", e);
+        }
+    }
+
     fn get_state(&mut self) -> DebuggerState {
-        DebuggerState::Paused
+        self.state
     }
 
     fn get_main_thread(&mut self) -> Self::ThreadId {
@@ -292,6 +306,22 @@ impl DebuggerWindows {
                         println!("Received a debug event {:?}", lpdebugevent.dwDebugEventCode);
                     }
                 }
+                self.sndr.send(MessageFromDebugger::Paused);
+                loop {
+                    match self.recvr.recv() {
+                        Ok(m) => match m {
+                            MessageToDebugger::Pause => {}
+                            MessageToDebugger::Continue => {
+                                break;
+                            }
+                        },
+                        Err(_e) => {
+                            should_exit = true;
+                            break;
+                        }
+                    }
+                }
+                self.sndr.send(MessageFromDebugger::Running);
                 if !should_exit {
                     unsafe {
                         windows::Win32::System::Diagnostics::Debug::ContinueDebugEvent(
@@ -392,6 +422,7 @@ impl DebuggerWindows {
         Box::new(DebuggerWindowsGui {
             recvr: from_debugger,
             sndr: to_debugger,
+            state: DebuggerState::Paused,
         })
     }
 }

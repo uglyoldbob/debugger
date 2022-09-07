@@ -4,6 +4,7 @@ pub mod debug_windows;
 #[cfg(target_os = "windows")]
 pub use debug_windows::*;
 
+#[derive(Copy, Clone)]
 pub enum DebuggerState {
     Paused,
     Running,
@@ -12,6 +13,8 @@ pub trait Debugger {
     type Registers;
     type ThreadId;
 
+    /// This resumes all threads that are not configured for suspension.
+    fn resume_all_threads(&mut self);
     fn process_debugger(&mut self);
     fn get_registers(&mut self, id: Self::ThreadId) -> Option<&Self::Registers>;
     fn set_registers(&mut self, id: Self::ThreadId, r: &Self::Registers);
