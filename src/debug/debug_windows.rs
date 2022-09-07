@@ -6,7 +6,7 @@ use windows::{
         Foundation::{BOOL, HANDLE},
         Security::SECURITY_ATTRIBUTES,
         System::{
-            Diagnostics::Debug::{self, DEBUG_EVENT},
+            Diagnostics::Debug::{self, DEBUG_EVENT, EXCEPTION_RECORD},
             Threading::{
                 PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOA,
             },
@@ -16,10 +16,10 @@ use windows::{
 
 use static_assertions::const_assert;
 
-use super::DebuggerState;
+use super::{DebuggerState, ReasonToPause};
 
-const_assert!(std::mem::size_of::<MessageToDebugger>() < 10);
-const_assert!(std::mem::size_of::<MessageFromDebugger>() < 10);
+const_assert!(std::mem::size_of::<MessageToDebugger>() < 20);
+const_assert!(std::mem::size_of::<MessageFromDebugger>() < 20);
 
 #[cfg(target_os = "windows")]
 pub type DebuggedMachine = dyn crate::debug::Debugger<Registers = X86Registers, ThreadId = u32>;
@@ -31,7 +31,8 @@ pub enum MessageToDebugger {
 
 pub enum MessageFromDebugger {
     ProcessStarted,
-    Paused,
+    Paused(super::ReasonToPause),
+    Exception(super::Exception),
     Running,
 }
 
@@ -78,10 +79,26 @@ pub enum X86Registers {
     Bits64(Registers64),
 }
 
+impl From<Debug::DEBUG_EVENT_CODE> for super::ReasonToPause {
+    fn from(e: Debug::DEBUG_EVENT_CODE) -> Self {
+        match e {
+            Debug::CREATE_PROCESS_DEBUG_EVENT => ReasonToPause::ProcessStart,
+            Debug::LOAD_DLL_DEBUG_EVENT => ReasonToPause::LibraryLoad,
+            Debug::UNLOAD_DLL_DEBUG_EVENT => ReasonToPause::LibraryUnload,
+            Debug::CREATE_THREAD_DEBUG_EVENT => ReasonToPause::ThreadStart,
+            Debug::EXIT_THREAD_DEBUG_EVENT => ReasonToPause::ThreadEnd,
+            Debug::EXCEPTION_DEBUG_EVENT => ReasonToPause::Exception,
+            Debug::EXIT_PROCESS_DEBUG_EVENT => ReasonToPause::ProcessEnd,
+            _ => ReasonToPause::Unknown,
+        }
+    }
+}
+
 pub struct DebuggerWindowsGui {
     recvr: std::sync::mpsc::Receiver<MessageFromDebugger>,
     sndr: std::sync::mpsc::Sender<MessageToDebugger>,
     state: DebuggerState,
+    exc: super::Exception,
 }
 
 impl crate::debug::Debugger for DebuggerWindowsGui {
@@ -92,14 +109,21 @@ impl crate::debug::Debugger for DebuggerWindowsGui {
         for e in self.recvr.try_iter() {
             match e {
                 MessageFromDebugger::ProcessStarted => {}
-                MessageFromDebugger::Paused => {
-                    self.state = DebuggerState::Paused;
+                MessageFromDebugger::Paused(reason) => {
+                    self.state = DebuggerState::Paused(reason);
                 }
                 MessageFromDebugger::Running => {
                     self.state = DebuggerState::Running;
                 }
+                MessageFromDebugger::Exception(e) => {
+                    self.exc = e;
+                }
             }
         }
+    }
+
+    fn get_exception(&mut self) -> super::Exception {
+        self.exc
     }
 
     fn resume_all_threads(&mut self) {
@@ -293,6 +317,13 @@ impl DebuggerWindows {
                     }
                     Debug::EXCEPTION_DEBUG_EVENT => {
                         println!("Exception in debugging");
+                        self.sndr
+                            .send(MessageFromDebugger::Exception(super::Exception::Code(
+                                unsafe { lpdebugevent.u.Exception.ExceptionRecord.ExceptionCode.0 },
+                            )));
+                        match unsafe { lpdebugevent.u.Exception.ExceptionRecord.ExceptionCode } {
+                            _ => {}
+                        }
                     }
                     Debug::EXIT_PROCESS_DEBUG_EVENT => {
                         if lpdebugevent.dwProcessId == self.info.dwProcessId {
@@ -306,7 +337,9 @@ impl DebuggerWindows {
                         println!("Received a debug event {:?}", lpdebugevent.dwDebugEventCode);
                     }
                 }
-                self.sndr.send(MessageFromDebugger::Paused);
+                self.sndr.send(MessageFromDebugger::Paused(
+                    lpdebugevent.dwDebugEventCode.into(),
+                ));
                 loop {
                     match self.recvr.recv() {
                         Ok(m) => match m {
@@ -321,7 +354,6 @@ impl DebuggerWindows {
                         }
                     }
                 }
-                self.sndr.send(MessageFromDebugger::Running);
                 if !should_exit {
                     unsafe {
                         windows::Win32::System::Diagnostics::Debug::ContinueDebugEvent(
@@ -330,6 +362,7 @@ impl DebuggerWindows {
                             cont_code,
                         );
                     }
+                    self.sndr.send(MessageFromDebugger::Running);
                 } else {
                     break;
                 }
@@ -422,7 +455,8 @@ impl DebuggerWindows {
         Box::new(DebuggerWindowsGui {
             recvr: from_debugger,
             sndr: to_debugger,
-            state: DebuggerState::Paused,
+            state: DebuggerState::Running,
+            exc: super::Exception::Unknown,
         })
     }
 }

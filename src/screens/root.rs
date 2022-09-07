@@ -6,7 +6,7 @@ use egui_multiwin::{
     tracked_window::{RedrawResponse, TrackedWindow},
 };
 
-use crate::AppCommon;
+use crate::{debug::ReasonToPause, AppCommon};
 
 use super::popup_window::PopupWindow;
 
@@ -125,8 +125,24 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                         });
                 });
             egui::CentralPanel::default().show(&egui.egui_ctx, |ui| match (*d).get_state() {
-                crate::debug::DebuggerState::Paused => {
+                crate::debug::DebuggerState::Paused(reason) => {
                     ui.label("Program is paused");
+                    let desc = match reason {
+                        ReasonToPause::ProcessStart => "Process start".to_string(),
+                        ReasonToPause::ProcessEnd => "Process end".to_string(),
+                        ReasonToPause::ThreadStart => "Thread start".to_string(),
+                        ReasonToPause::ThreadEnd => "Thread end".to_string(),
+                        ReasonToPause::LibraryLoad => "Library load".to_string(),
+                        ReasonToPause::LibraryUnload => "Library unload".to_string(),
+                        ReasonToPause::Exception => match (*d).get_exception() {
+                            crate::debug::Exception::Code(c) => {
+                                format!("Exception code {}", c)
+                            }
+                            crate::debug::Exception::Unknown => "Unknown exception".to_string(),
+                        },
+                        ReasonToPause::Unknown => "Unknown".to_string(),
+                    };
+                    ui.label(desc);
                 }
                 crate::debug::DebuggerState::Running => {
                     ui.label("Program is running");

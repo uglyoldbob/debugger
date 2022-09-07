@@ -5,8 +5,26 @@ pub mod debug_windows;
 pub use debug_windows::*;
 
 #[derive(Copy, Clone)]
+pub enum Exception {
+    Unknown,
+    Code(i32),
+}
+
+#[derive(Copy, Clone)]
+pub enum ReasonToPause {
+    ProcessStart,
+    ProcessEnd,
+    ThreadStart,
+    ThreadEnd,
+    LibraryLoad,
+    LibraryUnload,
+    Exception,
+    Unknown,
+}
+
+#[derive(Copy, Clone)]
 pub enum DebuggerState {
-    Paused,
+    Paused(ReasonToPause),
     Running,
 }
 pub trait Debugger {
@@ -28,4 +46,5 @@ pub trait Debugger {
         vd
     }
     fn get_state(&mut self) -> DebuggerState;
+    fn get_exception(&mut self) -> Exception;
 }
