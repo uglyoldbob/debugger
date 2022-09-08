@@ -19,7 +19,7 @@ use static_assertions::const_assert;
 use super::{DebuggerState, ReasonToPause};
 
 const_assert!(std::mem::size_of::<MessageToDebugger>() < 20);
-const_assert!(std::mem::size_of::<MessageFromDebugger>() < 20);
+const_assert!(std::mem::size_of::<MessageFromDebugger>() < 40);
 
 #[cfg(target_os = "windows")]
 pub type DebuggedMachine = dyn crate::debug::Debugger<Registers = X86Registers, ThreadId = u32>;
@@ -34,6 +34,8 @@ pub enum MessageFromDebugger {
     Paused(super::ReasonToPause),
     Exception(super::Exception),
     Running,
+    MainThread(u32),
+    ExtraThreads(Vec<u32>),
 }
 
 #[derive(Clone)]
@@ -99,6 +101,8 @@ pub struct DebuggerWindowsGui {
     sndr: std::sync::mpsc::Sender<MessageToDebugger>,
     state: DebuggerState,
     exc: super::Exception,
+    main_thread: Option<u32>,
+    extra_threads: Vec<u32>,
 }
 
 impl crate::debug::Debugger for DebuggerWindowsGui {
@@ -118,6 +122,12 @@ impl crate::debug::Debugger for DebuggerWindowsGui {
                 MessageFromDebugger::Exception(e) => {
                     self.exc = e;
                 }
+                MessageFromDebugger::MainThread(m) => {
+                    self.main_thread = Some(m);
+                }
+                MessageFromDebugger::ExtraThreads(e) => {
+                    self.extra_threads = e;
+                }
             }
         }
     }
@@ -136,12 +146,12 @@ impl crate::debug::Debugger for DebuggerWindowsGui {
         self.state
     }
 
-    fn get_main_thread(&mut self) -> Self::ThreadId {
-        0
+    fn get_main_thread(&mut self) -> Option<Self::ThreadId> {
+        self.main_thread
     }
 
     fn get_extra_threads(&mut self) -> Vec<Self::ThreadId> {
-        (1..8).collect()
+        self.extra_threads.clone()
     }
 
     fn get_registers(&mut self, id: Self::ThreadId) -> Option<&Self::Registers> {
@@ -157,6 +167,8 @@ pub struct DebuggerWindows {
     memory_map: Result<Vec<WorkingSetEntry>, u32>,
     recvr: std::sync::mpsc::Receiver<MessageToDebugger>,
     sndr: std::sync::mpsc::Sender<MessageFromDebugger>,
+    main_thread: Option<u32>,
+    extra_threads: Vec<u32>,
 }
 
 impl DebuggerWindows {
@@ -170,6 +182,8 @@ impl DebuggerWindows {
             recvr: recvr,
             sndr: sndr,
             memory_map: Err(0),
+            main_thread: None,
+            extra_threads: Vec::new(),
         }
     }
 
@@ -311,6 +325,11 @@ impl DebuggerWindows {
                     }
                     Debug::CREATE_THREAD_DEBUG_EVENT => {
                         println!("Thread creation event");
+                        let nt = unsafe { lpdebugevent.u.CreateThread.hThread };
+                        let tid = unsafe { windows::Win32::System::Threading::GetThreadId(nt) };
+                        self.extra_threads.push(tid);
+                        self.sndr
+                            .send(MessageFromDebugger::ExtraThreads(self.extra_threads.clone()));
                     }
                     Debug::EXIT_THREAD_DEBUG_EVENT => {
                         println!("Thread exit event");
@@ -440,7 +459,12 @@ impl DebuggerWindows {
             println!("The error is {:?}", err);
             return;
         }
-
+        self.main_thread = Some(self.info.dwThreadId);
+        self.sndr
+            .send(MessageFromDebugger::MainThread(self.info.dwThreadId));
+        self.sndr.send(MessageFromDebugger::ExtraThreads(
+            self.extra_threads.clone(),
+        ));
         self.debug_loop();
     }
 
@@ -457,6 +481,8 @@ impl DebuggerWindows {
             sndr: to_debugger,
             state: DebuggerState::Running,
             exc: super::Exception::Unknown,
+            main_thread: None,
+            extra_threads: Vec::new(),
         })
     }
 }

@@ -80,7 +80,7 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                             .show(ui, |ui| {
                                 for (i, id) in (*d).get_all_threads().iter().enumerate() {
                                     ui.horizontal(|ui| {
-                                        ui.label(format!("Thread #{}", id + 1));
+                                        ui.label(format!("Thread #{} 0x{:x}", i + 1, id));
                                         if ui.button("→").clicked() {
                                             println!("Single thread run selected");
                                         }
@@ -136,7 +136,7 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                         ReasonToPause::LibraryUnload => "Library unload".to_string(),
                         ReasonToPause::Exception => match (*d).get_exception() {
                             crate::debug::Exception::Code(c) => {
-                                format!("Exception code {}", c)
+                                format!("Exception code {:x}", c)
                             }
                             crate::debug::Exception::Unknown => "Unknown exception".to_string(),
                         },

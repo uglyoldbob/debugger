@@ -36,11 +36,13 @@ pub trait Debugger {
     fn process_debugger(&mut self);
     fn get_registers(&mut self, id: Self::ThreadId) -> Option<&Self::Registers>;
     fn set_registers(&mut self, id: Self::ThreadId, r: &Self::Registers);
-    fn get_main_thread(&mut self) -> Self::ThreadId;
+    fn get_main_thread(&mut self) -> Option<Self::ThreadId>;
     fn get_extra_threads(&mut self) -> Vec<Self::ThreadId>;
     fn get_all_threads(&mut self) -> Vec<Self::ThreadId> {
         let mut vd = Vec::<Self::ThreadId>::new();
-        vd.push(self.get_main_thread());
+        if let Some(t) = self.get_main_thread() {
+            vd.push(t);
+        }
         let mut others = self.get_extra_threads();
         vd.append(&mut others);
         vd
