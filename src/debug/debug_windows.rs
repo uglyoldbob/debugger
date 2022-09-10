@@ -3,10 +3,15 @@ use std::{ffi::c_void, ffi::CString, mem, path::PathBuf};
 use windows::{
     core::{PCSTR, PSTR},
     Win32::{
-        Foundation::{BOOL, HANDLE},
+        Foundation::{CloseHandle, BOOL, HANDLE},
         Security::SECURITY_ATTRIBUTES,
         System::{
-            Diagnostics::Debug::{self, DEBUG_EVENT, EXCEPTION_RECORD},
+            Diagnostics::{
+                Debug::{self, DEBUG_EVENT, EXCEPTION_RECORD},
+                ToolHelp::{
+                    Thread32First, Thread32Next, CREATE_TOOLHELP_SNAPSHOT_FLAGS, THREADENTRY32,
+                },
+            },
             Threading::{
                 PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOA,
             },
@@ -285,6 +290,54 @@ impl DebuggerWindows {
         42
     }
 
+    fn get_threads_from_snapshot(&mut self) {
+        let mut threads = Vec::new();
+        let mut extra_threads = Vec::new();
+        let mut f = CREATE_TOOLHELP_SNAPSHOT_FLAGS::default();
+        f = windows::Win32::System::Diagnostics::ToolHelp::TH32CS_SNAPTHREAD;
+        let snap_handle = unsafe {
+            windows::Win32::System::Diagnostics::ToolHelp::CreateToolhelp32Snapshot(
+                f,
+                self.info.dwProcessId,
+            )
+        };
+        match snap_handle {
+            Ok(handle) => {
+                let mut thr = THREADENTRY32::default();
+                thr.dwSize = mem::size_of::<THREADENTRY32>() as u32;
+                if !unsafe { Thread32First(handle, &mut thr as *mut THREADENTRY32) }.as_bool() {
+                    let err = unsafe { windows::Win32::Foundation::GetLastError() };
+                    println!("error get snapshot threads is {:?}", err);
+                    unsafe { CloseHandle(handle) };
+                    return;
+                }
+                loop {
+                    if thr.th32OwnerProcessID == self.info.dwProcessId {
+                        threads.push(thr.th32ThreadID);
+                    }
+                    if !unsafe { Thread32Next(handle, &mut thr as *mut THREADENTRY32) }.as_bool() {
+                        break;
+                    }
+                }
+                for tid in threads {
+                    match self.main_thread {
+                        None => extra_threads.push(tid),
+                        Some(m) => {
+                            if m != tid {
+                                extra_threads.push(tid);
+                            }
+                        }
+                    }
+                }
+                self.extra_threads = extra_threads;
+                unsafe { CloseHandle(handle) };
+            }
+            Err(e) => {
+                println!("The error is {:?}", e);
+            }
+        }
+    }
+
     fn debug_loop(&mut self) {
         let mut lpdebugevent = DEBUG_EVENT::default();
         let mut should_exit = false;
@@ -298,6 +351,10 @@ impl DebuggerWindows {
             if r.as_bool() {
                 let mut cont_code = windows::Win32::Foundation::DBG_CONTINUE.0 as u32;
                 self.query_working_set();
+                self.get_threads_from_snapshot();
+                self.sndr.send(MessageFromDebugger::ExtraThreads(
+                    self.extra_threads.clone(),
+                ));
                 if let Err(e) = &self.memory_map {
                     println!("No memory map data present error {}", e);
                 }
@@ -327,9 +384,10 @@ impl DebuggerWindows {
                         println!("Thread creation event");
                         let nt = unsafe { lpdebugevent.u.CreateThread.hThread };
                         let tid = unsafe { windows::Win32::System::Threading::GetThreadId(nt) };
-                        self.extra_threads.push(tid);
-                        self.sndr
-                            .send(MessageFromDebugger::ExtraThreads(self.extra_threads.clone()));
+                        //self.extra_threads.push(tid);
+                        //self.sndr.send(MessageFromDebugger::ExtraThreads(
+                        //    self.extra_threads.clone(),
+                        //));
                     }
                     Debug::EXIT_THREAD_DEBUG_EVENT => {
                         println!("Thread exit event");
