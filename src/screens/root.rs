@@ -49,6 +49,7 @@ impl TrackedWindow for RootWindow<crate::Windows> {
 
         let mut windows_to_create = vec![];
 
+        egui.egui_ctx.request_repaint();
         egui::TopBottomPanel::top("menubar").show(&egui.egui_ctx, |ui| {
             if ui.button("📂").clicked() {
                 let file = rfd::FileDialog::new()

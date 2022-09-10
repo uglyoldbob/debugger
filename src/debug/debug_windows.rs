@@ -341,6 +341,7 @@ impl DebuggerWindows {
     fn debug_loop(&mut self) {
         let mut lpdebugevent = DEBUG_EVENT::default();
         let mut should_exit = false;
+        let mut should_wait;
         loop {
             let r = unsafe {
                 windows::Win32::System::Diagnostics::Debug::WaitForDebugEvent(
@@ -349,6 +350,7 @@ impl DebuggerWindows {
                 )
             };
             if r.as_bool() {
+                should_wait = true;
                 let mut cont_code = windows::Win32::Foundation::DBG_CONTINUE.0 as u32;
                 self.query_working_set();
                 self.get_threads_from_snapshot();
@@ -360,6 +362,9 @@ impl DebuggerWindows {
                 }
                 match lpdebugevent.dwDebugEventCode {
                     Debug::CREATE_PROCESS_DEBUG_EVENT => {
+                        if unsafe {windows::Win32::System::Threading::GetProcessId(lpdebugevent.u.CreateProcessInfo.hProcess)} == self.info.dwProcessId {
+                            should_wait = false;
+                        }
                         if self.sndr.send(MessageFromDebugger::ProcessStarted).is_err() {
                             should_exit = true;
                         }
@@ -417,17 +422,19 @@ impl DebuggerWindows {
                 self.sndr.send(MessageFromDebugger::Paused(
                     lpdebugevent.dwDebugEventCode.into(),
                 ));
-                loop {
-                    match self.recvr.recv() {
-                        Ok(m) => match m {
-                            MessageToDebugger::Pause => {}
-                            MessageToDebugger::Continue => {
+                if should_wait {
+                    loop {
+                        match self.recvr.recv() {
+                            Ok(m) => match m {
+                                MessageToDebugger::Pause => {}
+                                MessageToDebugger::Continue => {
+                                    break;
+                                }
+                            },
+                            Err(_e) => {
+                                should_exit = true;
                                 break;
                             }
-                        },
-                        Err(_e) => {
-                            should_exit = true;
-                            break;
                         }
                     }
                 }
