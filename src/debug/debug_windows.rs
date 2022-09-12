@@ -364,7 +364,7 @@ impl DebuggerWindows {
     }
 
     fn get_thread_context(&self, c: u32) -> Option<X86Registers> {
-        let mut tar = windows::Win32::System::Threading::THREAD_GET_CONTEXT
+        let tar = windows::Win32::System::Threading::THREAD_GET_CONTEXT
             | windows::Win32::System::Threading::THREAD_QUERY_INFORMATION;
         let thandle = unsafe { windows::Win32::System::Threading::OpenThread(tar, false, c) };
         if let Err(e) = thandle {

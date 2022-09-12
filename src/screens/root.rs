@@ -140,7 +140,28 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                                         ui,
                                         |ui| match r {
                                             X86Registers::Bits32(r) => {
+                                                ui.label(format!("EIP: 0x{:x}", r.eip));
                                                 ui.label(format!("EAX: 0x{:x}", r.eax));
+                                                ui.label(format!("EBX: 0x{:x}", r.ebx));
+                                                ui.label(format!("ECX: 0x{:x}", r.ecx));
+                                                ui.label(format!("EDX: 0x{:x}", r.edx));
+                                                ui.label(format!("ESI: 0x{:x}", r.esi));
+                                                ui.label(format!("EDI: 0x{:x}", r.edi));
+                                                ui.label(format!("EBP: 0x{:x}", r.ebp));
+                                                ui.label(format!("ESP: 0x{:x}", r.esp));
+                                                ui.label(format!("CS: 0x{:x}", r.cs));
+                                                ui.label(format!("DS: 0x{:x}", r.ds));
+                                                ui.label(format!("ES: 0x{:x}", r.es));
+                                                ui.label(format!("FS: 0x{:x}", r.fs));
+                                                ui.label(format!("GS: 0x{:x}", r.gs));
+                                                ui.label(format!("SS: 0x{:x}", r.ss));
+                                                ui.label(format!("DR0: 0x{:x}", r.dr0));
+                                                ui.label(format!("DR1: 0x{:x}", r.dr1));
+                                                ui.label(format!("DR2: 0x{:x}", r.dr2));
+                                                ui.label(format!("DR3: 0x{:x}", r.dr3));
+                                                ui.label(format!("DR6: 0x{:x}", r.dr6));
+                                                ui.label(format!("DR7: 0x{:x}", r.dr7));
+                                                ui.label(format!("EFLAGS: 0x{:x}", r.eflags));
                                             }
                                             X86Registers::Bits64(r) => {
                                                 ui.label(format!("RAX: 0x{:x}", r.rax));
