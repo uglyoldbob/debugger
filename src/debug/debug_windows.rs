@@ -44,6 +44,7 @@ pub enum MessageFromDebugger {
     ExtraThreads(Vec<u32>),
     MainThreadContext(Box<Option<X86Registers>>),
     ExtraThreadContext(Box<HashMap<u32, Option<X86Registers>>>),
+    ThreadFocus(u32),
 }
 
 #[derive(Clone)]
@@ -166,11 +167,16 @@ pub struct DebuggerWindowsGui {
     extra_threads: Vec<u32>,
     main_context: Box<Option<X86Registers>>,
     extra_context: Box<HashMap<u32, Option<X86Registers>>>,
+    thread_focus: Option<u32>,
 }
 
 impl crate::debug::Debugger for DebuggerWindowsGui {
     type Registers = X86Registers;
     type ThreadId = u32;
+
+    fn get_thread_focus(&mut self) -> Option<Self::ThreadId> {
+        self.thread_focus.take()
+    }
 
     fn process_debugger(&mut self) {
         for e in self.recvr.try_iter() {
@@ -196,6 +202,9 @@ impl crate::debug::Debugger for DebuggerWindowsGui {
                 }
                 MessageFromDebugger::ExtraThreadContext(c) => {
                     self.extra_context = c;
+                }
+                MessageFromDebugger::ThreadFocus(t) => {
+                    self.thread_focus = Some(t);
                 }
             }
         }
@@ -365,7 +374,6 @@ impl DebuggerWindows {
         let thandle = thandle.unwrap();
         match self.is64 {
             Some(true) => {
-                println!("Getting 64 bit thread info");
                 let mut con = windows::Win32::System::Diagnostics::Debug::CONTEXT::default();
                 con.ContextFlags = 0x10003f;
                 let res = unsafe { Debug::GetThreadContext(thandle, &mut con) };
@@ -406,7 +414,6 @@ impl DebuggerWindows {
                 }))
             }
             Some(false) => {
-                println!("Getting 32 bit thread info");
                 let mut con32 =
                     windows::Win32::System::Diagnostics::Debug::WOW64_CONTEXT::default();
                 con32.ContextFlags = 0x10003f;
@@ -510,19 +517,6 @@ impl DebuggerWindows {
                 self.sndr.send(MessageFromDebugger::ExtraThreads(
                     self.extra_threads.clone(),
                 ));
-                let main_context = self.get_thread_context(self.info.dwThreadId);
-                let mut extra_contexts = HashMap::with_capacity(self.extra_threads.len());
-                for tid in &self.extra_threads {
-                    extra_contexts.insert(*tid, self.get_thread_context(*tid));
-                }
-                self.sndr
-                    .send(MessageFromDebugger::MainThreadContext(Box::new(
-                        main_context,
-                    )));
-                self.sndr
-                    .send(MessageFromDebugger::ExtraThreadContext(Box::new(
-                        extra_contexts,
-                    )));
                 if let Err(e) = &self.memory_map {
                     println!("No memory map data present error {}", e);
                 }
@@ -598,9 +592,24 @@ impl DebuggerWindows {
                         println!("Received a debug event {:?}", lpdebugevent.dwDebugEventCode);
                     }
                 }
+                let main_context = self.get_thread_context(self.info.dwThreadId);
+                let mut extra_contexts = HashMap::with_capacity(self.extra_threads.len());
+                for tid in &self.extra_threads {
+                    extra_contexts.insert(*tid, self.get_thread_context(*tid));
+                }
+                self.sndr
+                    .send(MessageFromDebugger::MainThreadContext(Box::new(
+                        main_context,
+                    )));
+                self.sndr
+                    .send(MessageFromDebugger::ExtraThreadContext(Box::new(
+                        extra_contexts,
+                    )));
                 self.sndr.send(MessageFromDebugger::Paused(
                     lpdebugevent.dwDebugEventCode.into(),
                 ));
+                self.sndr
+                    .send(MessageFromDebugger::ThreadFocus(lpdebugevent.dwThreadId));
                 if should_wait {
                     loop {
                         match self.recvr.recv() {
@@ -729,6 +738,7 @@ impl DebuggerWindows {
             extra_threads: Vec::new(),
             main_context: Box::new(None),
             extra_context: Box::new(HashMap::new()),
+            thread_focus: None,
         })
     }
 }

@@ -69,6 +69,9 @@ impl TrackedWindow for RootWindow<crate::Windows> {
 
         if let Some(d) = &mut c.debugger {
             (*d).process_debugger();
+            if let Some(f) = (*d).get_thread_focus() {
+                self.selection = Some(f);
+            }
             egui::TopBottomPanel::top("Command bar").show(&egui.egui_ctx, |ui| {
                 let r = ui.button("▶");
                 if r.clicked() {
@@ -86,7 +89,13 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                             .show(ui, |ui| {
                                 for (i, id) in (*d).get_all_threads().iter().enumerate() {
                                     ui.horizontal(|ui| {
-                                        if ui.selectable_label(self.selection == Some(*id), format!("Thread #{} 0x{:x}", i + 1, id)).clicked() {
+                                        if ui
+                                            .selectable_label(
+                                                self.selection == Some(*id),
+                                                format!("Thread #{} 0x{:x}", i + 1, id),
+                                            )
+                                            .clicked()
+                                        {
                                             self.selection = Some(*id);
                                         }
                                         if ui.button("→").clicked() {
@@ -129,14 +138,12 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                                 if let Some(r) = regs {
                                     egui::ScrollArea::vertical().auto_shrink([false; 2]).show(
                                         ui,
-                                        |ui| {
-                                            match r {
-                                                X86Registers::Bits32(r) => {
-                                                    ui.label(format!("EAX: 0x{:x}", r.eax));
-                                                }
-                                                X86Registers::Bits64(r) => {
-                                                    ui.label(format!("RAX: 0x{:x}", r.rax));
-                                                }
+                                        |ui| match r {
+                                            X86Registers::Bits32(r) => {
+                                                ui.label(format!("EAX: 0x{:x}", r.eax));
+                                            }
+                                            X86Registers::Bits64(r) => {
+                                                ui.label(format!("RAX: 0x{:x}", r.rax));
                                             }
                                         },
                                     );

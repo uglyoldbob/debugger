@@ -49,4 +49,5 @@ pub trait Debugger {
     }
     fn get_state(&mut self) -> DebuggerState;
     fn get_exception(&mut self) -> Exception;
+    fn get_thread_focus(&mut self) -> Option<Self::ThreadId>;
 }
