@@ -14,6 +14,7 @@ use windows::{
             },
             Threading::{
                 PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOA,
+                THREAD_ACCESS_RIGHTS,
             },
         },
     },
@@ -286,8 +287,28 @@ impl DebuggerWindows {
         self.memory_map = p;
     }
 
-    fn get_thread_context(&mut self) -> u32 {
-        42
+    fn get_thread_context(&mut self, c: u32) -> Option<X86Registers> {
+        let tar = THREAD_ACCESS_RIGHTS::default();
+        let thandle = unsafe { windows::Win32::System::Threading::OpenThread(tar, false, c) };
+        if let Err(e) = thandle {
+            println!("Error getting thread context {:?}", e);
+            return None;
+        }
+        let thandle = thandle.unwrap();
+        match self.is64 {
+            Some(true) => {
+                println!("Getting 64 bit thread info");
+                let mut con = windows::Win32::System::Diagnostics::Debug::CONTEXT::default();
+                con.ContextFlags = 0;
+                let res = unsafe { Debug::GetThreadContext(thandle, &mut con) };
+                Some(X86Registers::Bits64(Registers64 {}))
+            }
+            Some(false) => {
+                println!("Getting 32 bit thread info");
+                Some(X86Registers::Bits32(Registers32 {}))
+            }
+            None => None,
+        }
     }
 
     fn get_threads_from_snapshot(&mut self) {
@@ -353,16 +374,21 @@ impl DebuggerWindows {
                 should_wait = true;
                 let mut cont_code = windows::Win32::Foundation::DBG_CONTINUE.0 as u32;
                 self.query_working_set();
-                self.get_threads_from_snapshot();
                 self.sndr.send(MessageFromDebugger::ExtraThreads(
                     self.extra_threads.clone(),
                 ));
+                let main_context = self.get_thread_context(self.info.dwThreadId);
                 if let Err(e) = &self.memory_map {
                     println!("No memory map data present error {}", e);
                 }
                 match lpdebugevent.dwDebugEventCode {
                     Debug::CREATE_PROCESS_DEBUG_EVENT => {
-                        if unsafe {windows::Win32::System::Threading::GetProcessId(lpdebugevent.u.CreateProcessInfo.hProcess)} == self.info.dwProcessId {
+                        if unsafe {
+                            windows::Win32::System::Threading::GetProcessId(
+                                lpdebugevent.u.CreateProcessInfo.hProcess,
+                            )
+                        } == self.info.dwProcessId
+                        {
                             should_wait = false;
                         }
                         if self.sndr.send(MessageFromDebugger::ProcessStarted).is_err() {
@@ -389,12 +415,20 @@ impl DebuggerWindows {
                         println!("Thread creation event");
                         let nt = unsafe { lpdebugevent.u.CreateThread.hThread };
                         let tid = unsafe { windows::Win32::System::Threading::GetThreadId(nt) };
-                        //self.extra_threads.push(tid);
-                        //self.sndr.send(MessageFromDebugger::ExtraThreads(
-                        //    self.extra_threads.clone(),
-                        //));
+                        self.extra_threads.push(tid);
+                        self.sndr.send(MessageFromDebugger::ExtraThreads(
+                            self.extra_threads.clone(),
+                        ));
                     }
                     Debug::EXIT_THREAD_DEBUG_EVENT => {
+                        let nt = lpdebugevent.dwThreadId;
+                        let mut newextras = Vec::new();
+                        for t in &self.extra_threads {
+                            if *t != nt {
+                                newextras.push(*t);
+                            }
+                        }
+                        self.extra_threads = newextras;
                         println!("Thread exit event");
                     }
                     Debug::EXCEPTION_DEBUG_EVENT => {
