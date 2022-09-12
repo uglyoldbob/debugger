@@ -6,13 +6,17 @@ use egui_multiwin::{
     tracked_window::{RedrawResponse, TrackedWindow},
 };
 
-use crate::{debug::ReasonToPause, AppCommon};
+use crate::{
+    debug::{ReasonToPause, X86Registers},
+    AppCommon,
+};
 
 use super::popup_window::PopupWindow;
 
 pub struct RootWindow<T> {
     pub button_press_count: u32,
     pub num_popups_created: u32,
+    selection: Option<u32>,
     _d: PhantomData<T>,
 }
 
@@ -22,6 +26,7 @@ impl RootWindow<crate::Windows> {
             window_state: Box::new(RootWindow::<crate::Windows> {
                 button_press_count: 0,
                 num_popups_created: 0,
+                selection: None,
                 _d: PhantomData,
             }),
             builder: glutin::window::WindowBuilder::new()
@@ -81,7 +86,9 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                             .show(ui, |ui| {
                                 for (i, id) in (*d).get_all_threads().iter().enumerate() {
                                     ui.horizontal(|ui| {
-                                        ui.label(format!("Thread #{} 0x{:x}", i + 1, id));
+                                        if ui.selectable_label(self.selection == Some(*id), format!("Thread #{} 0x{:x}", i + 1, id)).clicked() {
+                                            self.selection = Some(*id);
+                                        }
                                         if ui.button("→").clicked() {
                                             println!("Single thread run selected");
                                         }
@@ -117,12 +124,24 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                         .resizable(true)
                         .show_inside(ui, |ui| {
                             ui.heading("Registers");
-                            egui::ScrollArea::vertical()
-                                .auto_shrink([false; 2])
-                                .show(ui, |ui| {
-                                    ui.label("EAX: 0x1234");
-                                    ui.label("EBX: 0x4321");
-                                });
+                            if let Some(threadid) = &self.selection {
+                                let regs = (*d).get_registers(*threadid);
+                                if let Some(r) = regs {
+                                    egui::ScrollArea::vertical().auto_shrink([false; 2]).show(
+                                        ui,
+                                        |ui| {
+                                            match r {
+                                                X86Registers::Bits32(r) => {
+                                                    ui.label(format!("EAX: 0x{:x}", r.eax));
+                                                }
+                                                X86Registers::Bits64(r) => {
+                                                    ui.label(format!("RAX: 0x{:x}", r.rax));
+                                                }
+                                            }
+                                        },
+                                    );
+                                }
+                            }
                         });
                 });
             egui::CentralPanel::default().show(&egui.egui_ctx, |ui| match (*d).get_state() {

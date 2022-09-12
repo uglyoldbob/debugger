@@ -1,4 +1,4 @@
-use std::{ffi::c_void, ffi::CString, mem, path::PathBuf};
+use std::{collections::HashMap, ffi::c_void, ffi::CString, mem, path::PathBuf};
 
 use windows::{
     core::{PCSTR, PSTR},
@@ -14,7 +14,7 @@ use windows::{
             },
             Threading::{
                 PROCESS_CREATION_FLAGS, PROCESS_INFORMATION, STARTF_USESTDHANDLES, STARTUPINFOA,
-                THREAD_ACCESS_RIGHTS,
+                THREAD_ACCESS_RIGHTS, THREAD_READ_CONTROL,
             },
         },
     },
@@ -42,6 +42,8 @@ pub enum MessageFromDebugger {
     Running,
     MainThread(u32),
     ExtraThreads(Vec<u32>),
+    MainThreadContext(Box<Option<X86Registers>>),
+    ExtraThreadContext(Box<HashMap<u32, Option<X86Registers>>>),
 }
 
 #[derive(Clone)]
@@ -78,9 +80,62 @@ impl WorkingSetEntry {
     }
 }
 
-pub struct Registers32 {}
+pub struct Registers32 {
+    pub dr0: u32,
+    pub dr1: u32,
+    pub dr2: u32,
+    pub dr3: u32,
+    pub dr6: u32,
+    pub dr7: u32,
+    pub cs: u32,
+    pub ds: u32,
+    pub es: u32,
+    pub fs: u32,
+    pub gs: u32,
+    pub ss: u32,
+    pub esp: u32,
+    pub ebp: u32,
+    pub eax: u32,
+    pub ebx: u32,
+    pub ecx: u32,
+    pub edx: u32,
+    pub edi: u32,
+    pub esi: u32,
+    pub eip: u32,
+    pub eflags: u32,
+}
 
-pub struct Registers64 {}
+pub struct Registers64 {
+    pub dr0: u64,
+    pub dr1: u64,
+    pub dr2: u64,
+    pub dr3: u64,
+    pub dr6: u64,
+    pub dr7: u64,
+    pub r8: u64,
+    pub r9: u64,
+    pub r10: u64,
+    pub r11: u64,
+    pub r12: u64,
+    pub r13: u64,
+    pub r14: u64,
+    pub r15: u64,
+    pub cs: u16,
+    pub ds: u16,
+    pub es: u16,
+    pub fs: u16,
+    pub gs: u16,
+    pub ss: u16,
+    pub rsp: u64,
+    pub rax: u64,
+    pub rbx: u64,
+    pub rcx: u64,
+    pub rdx: u64,
+    pub rdi: u64,
+    pub rsi: u64,
+    pub rip: u64,
+    pub eflags: u32,
+}
 
 pub enum X86Registers {
     Bits32(Registers32),
@@ -109,6 +164,8 @@ pub struct DebuggerWindowsGui {
     exc: super::Exception,
     main_thread: Option<u32>,
     extra_threads: Vec<u32>,
+    main_context: Box<Option<X86Registers>>,
+    extra_context: Box<HashMap<u32, Option<X86Registers>>>,
 }
 
 impl crate::debug::Debugger for DebuggerWindowsGui {
@@ -133,6 +190,12 @@ impl crate::debug::Debugger for DebuggerWindowsGui {
                 }
                 MessageFromDebugger::ExtraThreads(e) => {
                     self.extra_threads = e;
+                }
+                MessageFromDebugger::MainThreadContext(c) => {
+                    self.main_context = c;
+                }
+                MessageFromDebugger::ExtraThreadContext(c) => {
+                    self.extra_context = c;
                 }
             }
         }
@@ -161,7 +224,11 @@ impl crate::debug::Debugger for DebuggerWindowsGui {
     }
 
     fn get_registers(&mut self, id: Self::ThreadId) -> Option<&Self::Registers> {
-        None
+        if Some(id) == self.main_thread {
+            (&*self.main_context).as_ref()
+        } else {
+            (&*self.extra_context.get(&id).unwrap_or(&None)).as_ref()
+        }
     }
 
     fn set_registers(&mut self, id: Self::ThreadId, r: &Self::Registers) {}
@@ -287,8 +354,9 @@ impl DebuggerWindows {
         self.memory_map = p;
     }
 
-    fn get_thread_context(&mut self, c: u32) -> Option<X86Registers> {
-        let tar = THREAD_ACCESS_RIGHTS::default();
+    fn get_thread_context(&self, c: u32) -> Option<X86Registers> {
+        let mut tar = windows::Win32::System::Threading::THREAD_GET_CONTEXT
+            | windows::Win32::System::Threading::THREAD_QUERY_INFORMATION;
         let thandle = unsafe { windows::Win32::System::Threading::OpenThread(tar, false, c) };
         if let Err(e) = thandle {
             println!("Error getting thread context {:?}", e);
@@ -299,13 +367,78 @@ impl DebuggerWindows {
             Some(true) => {
                 println!("Getting 64 bit thread info");
                 let mut con = windows::Win32::System::Diagnostics::Debug::CONTEXT::default();
-                con.ContextFlags = 0;
+                con.ContextFlags = 0x10003f;
                 let res = unsafe { Debug::GetThreadContext(thandle, &mut con) };
-                Some(X86Registers::Bits64(Registers64 {}))
+                if !res.as_bool() {
+                    let err = unsafe { windows::Win32::Foundation::GetLastError() };
+                    println!("The error for gethreadcontext is {:?}", err);
+                }
+                Some(X86Registers::Bits64(Registers64 {
+                    dr0: con.Dr0,
+                    dr1: con.Dr1,
+                    dr2: con.Dr2,
+                    dr3: con.Dr3,
+                    dr6: con.Dr6,
+                    dr7: con.Dr7,
+                    r8: con.R8,
+                    r9: con.R9,
+                    r10: con.R10,
+                    r11: con.R11,
+                    r12: con.R12,
+                    r13: con.R13,
+                    r14: con.R14,
+                    r15: con.R15,
+                    cs: con.SegCs,
+                    ds: con.SegDs,
+                    es: con.SegEs,
+                    fs: con.SegFs,
+                    gs: con.SegGs,
+                    ss: con.SegSs,
+                    rsp: con.Rsp,
+                    rax: con.Rax,
+                    rbx: con.Rbx,
+                    rcx: con.Rcx,
+                    rdx: con.Rdx,
+                    rdi: con.Rdi,
+                    rsi: con.Rsi,
+                    rip: con.Rip,
+                    eflags: con.EFlags,
+                }))
             }
             Some(false) => {
                 println!("Getting 32 bit thread info");
-                Some(X86Registers::Bits32(Registers32 {}))
+                let mut con32 =
+                    windows::Win32::System::Diagnostics::Debug::WOW64_CONTEXT::default();
+                con32.ContextFlags = 0x10003f;
+                let res = unsafe { Debug::Wow64GetThreadContext(thandle, &mut con32) };
+                if !res.as_bool() {
+                    let err = unsafe { windows::Win32::Foundation::GetLastError() };
+                    println!("The error for wow64getthreadcontext is {:?}", err);
+                }
+                Some(X86Registers::Bits32(Registers32 {
+                    dr0: con32.Dr0,
+                    dr1: con32.Dr1,
+                    dr2: con32.Dr2,
+                    dr3: con32.Dr3,
+                    dr6: con32.Dr6,
+                    dr7: con32.Dr7,
+                    cs: con32.SegCs,
+                    ds: con32.SegDs,
+                    es: con32.SegEs,
+                    fs: con32.SegFs,
+                    gs: con32.SegGs,
+                    ss: con32.SegSs,
+                    esp: con32.Esp,
+                    ebp: con32.Ebp,
+                    eax: con32.Eax,
+                    ebx: con32.Ebx,
+                    ecx: con32.Ecx,
+                    edx: con32.Edx,
+                    edi: con32.Edi,
+                    esi: con32.Esi,
+                    eip: con32.Eip,
+                    eflags: con32.EFlags,
+                }))
             }
             None => None,
         }
@@ -378,6 +511,18 @@ impl DebuggerWindows {
                     self.extra_threads.clone(),
                 ));
                 let main_context = self.get_thread_context(self.info.dwThreadId);
+                let mut extra_contexts = HashMap::with_capacity(self.extra_threads.len());
+                for tid in &self.extra_threads {
+                    extra_contexts.insert(*tid, self.get_thread_context(*tid));
+                }
+                self.sndr
+                    .send(MessageFromDebugger::MainThreadContext(Box::new(
+                        main_context,
+                    )));
+                self.sndr
+                    .send(MessageFromDebugger::ExtraThreadContext(Box::new(
+                        extra_contexts,
+                    )));
                 if let Err(e) = &self.memory_map {
                     println!("No memory map data present error {}", e);
                 }
@@ -422,7 +567,7 @@ impl DebuggerWindows {
                     }
                     Debug::EXIT_THREAD_DEBUG_EVENT => {
                         let nt = lpdebugevent.dwThreadId;
-                        let mut newextras = Vec::new();
+                        let mut newextras = Vec::with_capacity(self.extra_threads.len() - 1);
                         for t in &self.extra_threads {
                             if *t != nt {
                                 newextras.push(*t);
@@ -582,6 +727,8 @@ impl DebuggerWindows {
             exc: super::Exception::Unknown,
             main_thread: None,
             extra_threads: Vec::new(),
+            main_context: Box::new(None),
+            extra_context: Box::new(HashMap::new()),
         })
     }
 }
