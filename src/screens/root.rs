@@ -164,7 +164,28 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                                                 ui.label(format!("EFLAGS: 0x{:x}", r.eflags));
                                             }
                                             X86Registers::Bits64(r) => {
+                                                ui.label(format!("RIP: 0x{:x}", r.rip));
                                                 ui.label(format!("RAX: 0x{:x}", r.rax));
+                                                ui.label(format!("RBX: 0x{:x}", r.rbx));
+                                                ui.label(format!("RCX: 0x{:x}", r.rcx));
+                                                ui.label(format!("RDX: 0x{:x}", r.rdx));
+                                                ui.label(format!("RSI: 0x{:x}", r.rsi));
+                                                ui.label(format!("RDI: 0x{:x}", r.rdi));
+                                                ui.label(format!("RBP: 0x{:x}", r.rbp));
+                                                ui.label(format!("RSP: 0x{:x}", r.rsp));
+                                                ui.label(format!("CS: 0x{:x}", r.cs));
+                                                ui.label(format!("DS: 0x{:x}", r.ds));
+                                                ui.label(format!("ES: 0x{:x}", r.es));
+                                                ui.label(format!("FS: 0x{:x}", r.fs));
+                                                ui.label(format!("GS: 0x{:x}", r.gs));
+                                                ui.label(format!("SS: 0x{:x}", r.ss));
+                                                ui.label(format!("DR0: 0x{:x}", r.dr0));
+                                                ui.label(format!("DR1: 0x{:x}", r.dr1));
+                                                ui.label(format!("DR2: 0x{:x}", r.dr2));
+                                                ui.label(format!("DR3: 0x{:x}", r.dr3));
+                                                ui.label(format!("DR6: 0x{:x}", r.dr6));
+                                                ui.label(format!("DR7: 0x{:x}", r.dr7));
+                                                ui.label(format!("EFLAGS: 0x{:x}", r.eflags));
                                             }
                                         },
                                     );

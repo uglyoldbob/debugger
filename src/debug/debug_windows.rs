@@ -128,6 +128,7 @@ pub struct Registers64 {
     pub gs: u16,
     pub ss: u16,
     pub rsp: u64,
+    pub rbp: u64,
     pub rax: u64,
     pub rbx: u64,
     pub rcx: u64,
@@ -253,6 +254,11 @@ pub struct DebuggerWindows {
     extra_threads: Vec<u32>,
 }
 
+#[repr(align(64))]
+struct ContextHolder {
+    c: Debug::CONTEXT,
+}
+
 impl DebuggerWindows {
     fn new(
         recvr: std::sync::mpsc::Receiver<MessageToDebugger>,
@@ -376,41 +382,43 @@ impl DebuggerWindows {
             Some(true) => {
                 let mut con = windows::Win32::System::Diagnostics::Debug::CONTEXT::default();
                 con.ContextFlags = 0x10003f;
-                let res = unsafe { Debug::GetThreadContext(thandle, &mut con) };
+                let mut con = ContextHolder { c: con };
+                let res = unsafe { Debug::GetThreadContext(thandle, &mut con.c) };
                 if !res.as_bool() {
                     let err = unsafe { windows::Win32::Foundation::GetLastError() };
                     println!("The error for gethreadcontext is {:?}", err);
                 }
                 Some(X86Registers::Bits64(Registers64 {
-                    dr0: con.Dr0,
-                    dr1: con.Dr1,
-                    dr2: con.Dr2,
-                    dr3: con.Dr3,
-                    dr6: con.Dr6,
-                    dr7: con.Dr7,
-                    r8: con.R8,
-                    r9: con.R9,
-                    r10: con.R10,
-                    r11: con.R11,
-                    r12: con.R12,
-                    r13: con.R13,
-                    r14: con.R14,
-                    r15: con.R15,
-                    cs: con.SegCs,
-                    ds: con.SegDs,
-                    es: con.SegEs,
-                    fs: con.SegFs,
-                    gs: con.SegGs,
-                    ss: con.SegSs,
-                    rsp: con.Rsp,
-                    rax: con.Rax,
-                    rbx: con.Rbx,
-                    rcx: con.Rcx,
-                    rdx: con.Rdx,
-                    rdi: con.Rdi,
-                    rsi: con.Rsi,
-                    rip: con.Rip,
-                    eflags: con.EFlags,
+                    dr0: con.c.Dr0,
+                    dr1: con.c.Dr1,
+                    dr2: con.c.Dr2,
+                    dr3: con.c.Dr3,
+                    dr6: con.c.Dr6,
+                    dr7: con.c.Dr7,
+                    r8: con.c.R8,
+                    r9: con.c.R9,
+                    r10: con.c.R10,
+                    r11: con.c.R11,
+                    r12: con.c.R12,
+                    r13: con.c.R13,
+                    r14: con.c.R14,
+                    r15: con.c.R15,
+                    cs: con.c.SegCs,
+                    ds: con.c.SegDs,
+                    es: con.c.SegEs,
+                    fs: con.c.SegFs,
+                    gs: con.c.SegGs,
+                    ss: con.c.SegSs,
+                    rsp: con.c.Rsp,
+                    rbp: con.c.Rbp,
+                    rax: con.c.Rax,
+                    rbx: con.c.Rbx,
+                    rcx: con.c.Rcx,
+                    rdx: con.c.Rdx,
+                    rdi: con.c.Rdi,
+                    rsi: con.c.Rsi,
+                    rip: con.c.Rip,
+                    eflags: con.c.EFlags,
                 }))
             }
             Some(false) => {
