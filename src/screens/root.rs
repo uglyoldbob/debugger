@@ -56,15 +56,18 @@ impl TrackedWindow for RootWindow<crate::Windows> {
 
         egui.egui_ctx.request_repaint();
         egui::TopBottomPanel::top("menubar").show(&egui.egui_ctx, |ui| {
-            if ui.button("📂").clicked() {
-                let file = rfd::FileDialog::new()
-                    .add_filter("executables", &["exe"])
-                    .pick_file();
-                if let Some(file) = file {
-                    println!("You picked {:?}", file.display());
-                    c.debugger = Some(crate::debug::DebuggerWindows::start_process(file));
+            ui.menu_button("File", |ui| {
+                if ui.button("Open executable").clicked() {
+                    let file = rfd::FileDialog::new()
+                        .add_filter("executables", &["exe"])
+                        .pick_file();
+                    if let Some(file) = file {
+                        println!("You picked {:?}", file.display());
+                        c.debugger = Some(crate::debug::DebuggerWindows::start_process(file));
+                    }
+                    ui.close_menu();
                 }
-            }
+            });
         });
 
         if let Some(d) = &mut c.debugger {
@@ -77,6 +80,33 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                 if r.clicked() {
                     (*d).resume_all_threads();
                 }
+                ui.horizontal(|ui| {
+                    match (*d).get_state() {
+                        crate::debug::DebuggerState::Paused(reason) => {
+                            
+                            ui.label("Program is paused, ");
+                            let desc = match reason {
+                                ReasonToPause::ProcessStart => "Process start".to_string(),
+                                ReasonToPause::ProcessEnd => "Process end".to_string(),
+                                ReasonToPause::ThreadStart => "Thread start".to_string(),
+                                ReasonToPause::ThreadEnd => "Thread end".to_string(),
+                                ReasonToPause::LibraryLoad => "Library load".to_string(),
+                                ReasonToPause::LibraryUnload => "Library unload".to_string(),
+                                ReasonToPause::Exception => match (*d).get_exception() {
+                                    crate::debug::Exception::Code(c) => {
+                                        format!("Exception code {:x}", c)
+                                    }
+                                    crate::debug::Exception::Unknown => "Unknown exception".to_string(),
+                                },
+                                ReasonToPause::Unknown => "Unknown".to_string(),
+                            };
+                            ui.label(desc);
+                        }
+                        crate::debug::DebuggerState::Running => {
+                            ui.label("Program is running");
+                        }
+                    }
+                });
             });
 
             egui::SidePanel::left("side panel 1").show(&egui.egui_ctx, |ui| {
@@ -110,20 +140,6 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                                     });
                                 }
                             });
-                    });
-                egui::TopBottomPanel::bottom("bottom remainder panel")
-                    .resizable(true)
-                    .show_inside(ui, |ui| {
-                        if ui.button("New popup").clicked() {
-                            windows_to_create.push(PopupWindow::new(format!(
-                                "popup window #{}",
-                                self.num_popups_created
-                            )));
-                            self.num_popups_created += 1;
-                        }
-                        if ui.button("Quit").clicked() {
-                            quit = true;
-                        }
                     });
             });
             egui::SidePanel::right("right panel")
@@ -193,28 +209,12 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                             }
                         });
                 });
-            egui::CentralPanel::default().show(&egui.egui_ctx, |ui| match (*d).get_state() {
-                crate::debug::DebuggerState::Paused(reason) => {
-                    ui.label("Program is paused");
-                    let desc = match reason {
-                        ReasonToPause::ProcessStart => "Process start".to_string(),
-                        ReasonToPause::ProcessEnd => "Process end".to_string(),
-                        ReasonToPause::ThreadStart => "Thread start".to_string(),
-                        ReasonToPause::ThreadEnd => "Thread end".to_string(),
-                        ReasonToPause::LibraryLoad => "Library load".to_string(),
-                        ReasonToPause::LibraryUnload => "Library unload".to_string(),
-                        ReasonToPause::Exception => match (*d).get_exception() {
-                            crate::debug::Exception::Code(c) => {
-                                format!("Exception code {:x}", c)
-                            }
-                            crate::debug::Exception::Unknown => "Unknown exception".to_string(),
-                        },
-                        ReasonToPause::Unknown => "Unknown".to_string(),
-                    };
-                    ui.label(desc);
-                }
-                crate::debug::DebuggerState::Running => {
-                    ui.label("Program is running");
+            egui::CentralPanel::default().show(&egui.egui_ctx, |ui| {
+                if let Some(threadid) = &self.selection {
+                    let regs = (*d).get_registers(*threadid);
+                    if let Some(r) = regs {
+                        ui.label("placeholder for disassembly");
+                    }
                 }
             });
         } else {

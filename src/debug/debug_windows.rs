@@ -634,6 +634,19 @@ impl DebuggerWindows {
                         }
                     }
                 }
+                let main_context = None;
+                let mut extra_contexts = HashMap::with_capacity(self.extra_threads.len());
+                for tid in &self.extra_threads {
+                    extra_contexts.insert(*tid, None);
+                }
+                self.sndr
+                    .send(MessageFromDebugger::MainThreadContext(Box::new(
+                        main_context,
+                    )));
+                self.sndr
+                    .send(MessageFromDebugger::ExtraThreadContext(Box::new(
+                        extra_contexts,
+                    )));
                 if !should_exit {
                     unsafe {
                         windows::Win32::System::Diagnostics::Debug::ContinueDebugEvent(
