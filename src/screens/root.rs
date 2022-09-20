@@ -80,31 +80,28 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                 if r.clicked() {
                     (*d).resume_all_threads();
                 }
-                ui.horizontal(|ui| {
-                    match (*d).get_state() {
-                        crate::debug::DebuggerState::Paused(reason) => {
-                            
-                            ui.label("Program is paused, ");
-                            let desc = match reason {
-                                ReasonToPause::ProcessStart => "Process start".to_string(),
-                                ReasonToPause::ProcessEnd => "Process end".to_string(),
-                                ReasonToPause::ThreadStart => "Thread start".to_string(),
-                                ReasonToPause::ThreadEnd => "Thread end".to_string(),
-                                ReasonToPause::LibraryLoad => "Library load".to_string(),
-                                ReasonToPause::LibraryUnload => "Library unload".to_string(),
-                                ReasonToPause::Exception => match (*d).get_exception() {
-                                    crate::debug::Exception::Code(c) => {
-                                        format!("Exception code {:x}", c)
-                                    }
-                                    crate::debug::Exception::Unknown => "Unknown exception".to_string(),
-                                },
-                                ReasonToPause::Unknown => "Unknown".to_string(),
-                            };
-                            ui.label(desc);
-                        }
-                        crate::debug::DebuggerState::Running => {
-                            ui.label("Program is running");
-                        }
+                ui.horizontal(|ui| match (*d).get_state() {
+                    crate::debug::DebuggerState::Paused(reason) => {
+                        ui.label("Program is paused, ");
+                        let desc = match reason {
+                            ReasonToPause::ProcessStart => "Process start".to_string(),
+                            ReasonToPause::ProcessEnd => "Process end".to_string(),
+                            ReasonToPause::ThreadStart => "Thread start".to_string(),
+                            ReasonToPause::ThreadEnd => "Thread end".to_string(),
+                            ReasonToPause::LibraryLoad => "Library load".to_string(),
+                            ReasonToPause::LibraryUnload => "Library unload".to_string(),
+                            ReasonToPause::Exception => match (*d).get_exception() {
+                                crate::debug::Exception::Code(c) => {
+                                    format!("Exception code {:x}", c)
+                                }
+                                crate::debug::Exception::Unknown => "Unknown exception".to_string(),
+                            },
+                            ReasonToPause::Unknown => "Unknown".to_string(),
+                        };
+                        ui.label(desc);
+                    }
+                    crate::debug::DebuggerState::Running => {
+                        ui.label("Program is running");
                     }
                 });
             });
@@ -141,6 +138,23 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                                 }
                             });
                     });
+                if let Some(ranges) = (*d).get_memory_ranges() {
+                    egui::TopBottomPanel::top("memory range panel")
+                        .resizable(true)
+                        .show_inside(ui, |ui| {
+                            ui.heading("Memory Ranges");
+                            egui::ScrollArea::vertical()
+                                .auto_shrink([false; 2])
+                                .show(ui, |ui| {
+                                    for r in ranges {
+                                        ui.label(format!(
+                                            "0x{:x}, 0x{:x} {:x}",
+                                            r.begin, r.length, r.flags
+                                        ));
+                                    }
+                                });
+                        });
+                }
             });
             egui::SidePanel::right("right panel")
                 .resizable(true)

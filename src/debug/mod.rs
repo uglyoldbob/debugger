@@ -27,6 +27,27 @@ pub enum DebuggerState {
     Paused(ReasonToPause),
     Running,
 }
+
+pub struct MemoryRange {
+    pub begin: usize,
+    pub length: usize,
+    pub flags: u8,
+}
+
+impl MemoryRange {
+    pub fn contains(&self, adr: usize) -> bool {
+        adr >= self.begin && adr < (self.begin + self.length)
+    }
+    pub fn contiguous(&self, adr: usize, flags: u8) -> bool {
+        self.flags == flags && adr == (self.begin + self.length)
+    }
+    pub fn add_page(&mut self, adr: usize, flags: u8, size: usize) {
+        if self.contiguous(adr, flags) {
+            self.length += size;
+        }
+    }
+}
+
 pub trait Debugger {
     type Registers;
     type ThreadId;
@@ -50,4 +71,6 @@ pub trait Debugger {
     fn get_state(&mut self) -> DebuggerState;
     fn get_exception(&mut self) -> Exception;
     fn get_thread_focus(&mut self) -> Option<Self::ThreadId>;
+
+    fn get_memory_ranges(&mut self) -> Option<&Vec<MemoryRange>>;
 }

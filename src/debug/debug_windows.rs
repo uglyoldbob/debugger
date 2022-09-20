@@ -22,7 +22,7 @@ use windows::{
 
 use static_assertions::const_assert;
 
-use super::{DebuggerState, ReasonToPause};
+use super::{DebuggerState, MemoryRange, ReasonToPause};
 
 const_assert!(std::mem::size_of::<MessageToDebugger>() < 20);
 const_assert!(std::mem::size_of::<MessageFromDebugger>() < 40);
@@ -45,6 +45,7 @@ pub enum MessageFromDebugger {
     MainThreadContext(Box<Option<X86Registers>>),
     ExtraThreadContext(Box<HashMap<u32, Option<X86Registers>>>),
     ThreadFocus(u32),
+    MemoryRanges(Option<Vec<MemoryRange>>),
 }
 
 #[derive(Clone)]
@@ -169,11 +170,16 @@ pub struct DebuggerWindowsGui {
     main_context: Box<Option<X86Registers>>,
     extra_context: Box<HashMap<u32, Option<X86Registers>>>,
     thread_focus: Option<u32>,
+    ranges: Option<Vec<MemoryRange>>,
 }
 
 impl crate::debug::Debugger for DebuggerWindowsGui {
     type Registers = X86Registers;
     type ThreadId = u32;
+
+    fn get_memory_ranges(&mut self) -> Option<&Vec<MemoryRange>> {
+        self.ranges.as_ref()
+    }
 
     fn get_thread_focus(&mut self) -> Option<Self::ThreadId> {
         self.thread_focus.take()
@@ -206,6 +212,9 @@ impl crate::debug::Debugger for DebuggerWindowsGui {
                 }
                 MessageFromDebugger::ThreadFocus(t) => {
                     self.thread_focus = Some(t);
+                }
+                MessageFromDebugger::MemoryRanges(r) => {
+                    self.ranges = r;
                 }
             }
         }
@@ -273,6 +282,12 @@ impl DebuggerWindows {
             main_thread: None,
             extra_threads: Vec::new(),
         }
+    }
+
+    fn get_page_size(&self) -> u32 {
+        let mut info = windows::Win32::System::SystemInformation::SYSTEM_INFO::default();
+        unsafe { windows::Win32::System::SystemInformation::GetSystemInfo(&mut info) };
+        info.dwPageSize
     }
 
     fn is_64_bit_process(&mut self) -> Option<bool> {
@@ -367,6 +382,44 @@ impl DebuggerWindows {
                 .collect()
         });
         self.memory_map = p;
+    }
+
+    fn make_ranges(&self) -> Option<Vec<MemoryRange>> {
+        let mut ranges: Vec<MemoryRange> = Vec::new();
+        let page_size = self.get_page_size();
+        if let Ok(entries) = &self.memory_map {
+            for e in entries {
+                let mut should_add: Option<&mut MemoryRange> = None;
+                let mut entry_found = false;
+                for existing in &mut ranges {
+                    if existing.contains(e.address) {
+                        entry_found = true;
+                    }
+                    if existing.contiguous(e.address, e.flags) {
+                        should_add = Some(existing);
+                        break;
+                    }
+                }
+                if !entry_found {
+                    match should_add {
+                        None => {
+                            let r = MemoryRange {
+                                begin: e.address,
+                                length: page_size as usize,
+                                flags: e.flags,
+                            };
+                            ranges.push(r);
+                        }
+                        Some(i) => {
+                            i.add_page(e.address, e.flags, page_size as usize);
+                        }
+                    }
+                }
+            }
+            Some(ranges)
+        } else {
+            None
+        }
     }
 
     fn get_thread_context(&self, c: u32) -> Option<X86Registers> {
@@ -522,6 +575,8 @@ impl DebuggerWindows {
                 should_wait = true;
                 let mut cont_code = windows::Win32::Foundation::DBG_CONTINUE.0 as u32;
                 self.query_working_set();
+                let ranges = self.make_ranges();
+                self.sndr.send(MessageFromDebugger::MemoryRanges(ranges));
                 self.sndr.send(MessageFromDebugger::ExtraThreads(
                     self.extra_threads.clone(),
                 ));
@@ -760,6 +815,7 @@ impl DebuggerWindows {
             main_context: Box::new(None),
             extra_context: Box::new(HashMap::new()),
             thread_focus: None,
+            ranges: None,
         })
     }
 }
