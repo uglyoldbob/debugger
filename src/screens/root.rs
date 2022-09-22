@@ -16,7 +16,9 @@ use super::popup_window::PopupWindow;
 pub struct RootWindow<T> {
     pub button_press_count: u32,
     pub num_popups_created: u32,
-    selection: Option<u32>,
+    thread_selection: Option<u32>,
+    /// Defines which region of memory is selected for examination
+    memory_selection: Option<usize>,
     _d: PhantomData<T>,
 }
 
@@ -26,7 +28,8 @@ impl RootWindow<crate::Windows> {
             window_state: Box::new(RootWindow::<crate::Windows> {
                 button_press_count: 0,
                 num_popups_created: 0,
-                selection: None,
+                thread_selection: None,
+                memory_selection: None,
                 _d: PhantomData,
             }),
             builder: glutin::window::WindowBuilder::new()
@@ -73,7 +76,7 @@ impl TrackedWindow for RootWindow<crate::Windows> {
         if let Some(d) = &mut c.debugger {
             (*d).process_debugger();
             if let Some(f) = (*d).get_thread_focus() {
-                self.selection = Some(f);
+                self.thread_selection = Some(f);
             }
             egui::TopBottomPanel::top("Command bar").show(&egui.egui_ctx, |ui| {
                 let r = ui.button("▶");
@@ -118,21 +121,12 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                                     ui.horizontal(|ui| {
                                         if ui
                                             .selectable_label(
-                                                self.selection == Some(*id),
+                                                self.thread_selection == Some(*id),
                                                 format!("Thread #{} 0x{:x}", i + 1, id),
                                             )
                                             .clicked()
                                         {
-                                            self.selection = Some(*id);
-                                        }
-                                        if ui.button("→").clicked() {
-                                            println!("Single thread run selected");
-                                        }
-                                        if ui.button("▶").clicked() {
-                                            println!("Single thread resume selected");
-                                        }
-                                        if ui.button("⏸").clicked() {
-                                            println!("Single thread pause selected");
+                                            self.thread_selection = Some(*id);
                                         }
                                     });
                                 }
@@ -146,11 +140,19 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                             egui::ScrollArea::vertical()
                                 .auto_shrink([false; 2])
                                 .show(ui, |ui| {
-                                    for r in ranges {
-                                        ui.label(format!(
-                                            "0x{:x}, 0x{:x} {:x}",
-                                            r.begin, r.length, r.flags
-                                        ));
+                                    for (i, r) in ranges.iter().enumerate() {
+                                        if ui
+                                            .selectable_label(
+                                                self.memory_selection == Some(i),
+                                                format!(
+                                                    "0x{:x}, 0x{:x} {:x}",
+                                                    r.begin, r.length, r.flags
+                                                ),
+                                            )
+                                            .clicked()
+                                        {
+                                            self.memory_selection = Some(i);
+                                        }
                                     }
                                 });
                         });
@@ -163,7 +165,7 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                         .resizable(true)
                         .show_inside(ui, |ui| {
                             ui.heading("Registers");
-                            if let Some(threadid) = &self.selection {
+                            if let Some(threadid) = &self.thread_selection {
                                 let regs = (*d).get_registers(*threadid);
                                 if let Some(r) = regs {
                                     egui::ScrollArea::vertical().auto_shrink([false; 2]).show(
@@ -224,11 +226,23 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                         });
                 });
             egui::CentralPanel::default().show(&egui.egui_ctx, |ui| {
-                if let Some(threadid) = &self.selection {
+                if let Some(threadid) = &self.thread_selection {
                     let regs = (*d).get_registers(*threadid);
                     if let Some(r) = regs {
                         ui.label("placeholder for disassembly");
                     }
+                }
+                if let Some(mi) = self.memory_selection {
+                    egui::TopBottomPanel::bottom("memory view")
+                        .resizable(true)
+                        .show_inside(ui, |ui| {
+                            ui.horizontal(|ui| {
+                                ui.label("Memory ");
+                                if ui.button("X").clicked() {
+                                    self.memory_selection = None;
+                                }
+                            });
+                        });
                 }
             });
         } else {
