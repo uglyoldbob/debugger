@@ -6,7 +6,7 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-egui-multiwin = "0.5.2"
+eframe = "0.31.1"
 rfd = "0.10.0"
 static_assertions = "1.1.0"
 
