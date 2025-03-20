@@ -3,7 +3,7 @@ use std::{collections::{BTreeMap, HashMap}, ffi::{c_void, CString}, mem, path::P
 use windows::{
     core::{PCSTR, PSTR},
     Win32::{
-        Foundation::{CloseHandle, BOOL, HANDLE},
+        Foundation::{CloseHandle, HANDLE},
         Security::SECURITY_ATTRIBUTES,
         System::{
             Diagnostics::{
@@ -303,10 +303,10 @@ impl DebuggerWindows {
             windows::Win32::System::Threading::IsWow64Process2(
                 self.info.hProcess,
                 &mut process as *mut windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE,
-                &mut native as *mut windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE,
+                Some(&mut native as *mut windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE),
             )
         };
-        self.is64 = if res.as_bool() {
+        self.is64 = if res.is_ok() {
             match process {
                 windows::Win32::System::SystemInformation::IMAGE_FILE_MACHINE_UNKNOWN => {
                     match native {
@@ -438,10 +438,10 @@ impl DebuggerWindows {
         match self.is64 {
             Some(true) => {
                 let mut con = windows::Win32::System::Diagnostics::Debug::CONTEXT::default();
-                con.ContextFlags = 0x10003f;
+                con.ContextFlags.0 = 0x10003f;
                 let mut con = ContextHolder { c: con };
                 let res = unsafe { Debug::GetThreadContext(thandle, &mut con.c) };
-                if !res.as_bool() {
+                if res.is_err() {
                     let err = unsafe { windows::Win32::Foundation::GetLastError() };
                     println!("The error for gethreadcontext is {:?}", err);
                 }
@@ -481,9 +481,9 @@ impl DebuggerWindows {
             Some(false) => {
                 let mut con32 =
                     windows::Win32::System::Diagnostics::Debug::WOW64_CONTEXT::default();
-                con32.ContextFlags = 0x10003f;
+                con32.ContextFlags.0 = 0x10003f;
                 let res = unsafe { Debug::Wow64GetThreadContext(thandle, &mut con32) };
-                if !res.as_bool() {
+                if res.is_err() {
                     let err = unsafe { windows::Win32::Foundation::GetLastError() };
                     println!("The error for wow64getthreadcontext is {:?}", err);
                 }
@@ -531,7 +531,7 @@ impl DebuggerWindows {
             Ok(handle) => {
                 let mut thr = THREADENTRY32::default();
                 thr.dwSize = mem::size_of::<THREADENTRY32>() as u32;
-                if !unsafe { Thread32First(handle, &mut thr as *mut THREADENTRY32) }.as_bool() {
+                if !unsafe { Thread32First(handle, &mut thr as *mut THREADENTRY32) }.is_ok() {
                     let err = unsafe { windows::Win32::Foundation::GetLastError() };
                     println!("error get snapshot threads is {:?}", err);
                     unsafe { CloseHandle(handle) };
@@ -541,7 +541,7 @@ impl DebuggerWindows {
                     if thr.th32OwnerProcessID == self.info.dwProcessId {
                         threads.push(thr.th32ThreadID);
                     }
-                    if !unsafe { Thread32Next(handle, &mut thr as *mut THREADENTRY32) }.as_bool() {
+                    if unsafe { Thread32Next(handle, &mut thr as *mut THREADENTRY32) }.is_ok() {
                         break;
                     }
                 }
@@ -575,9 +575,9 @@ impl DebuggerWindows {
                     0xFFFFFFFF,
                 )
             };
-            if r.as_bool() {
+            if r.is_ok() {
                 should_wait = true;
-                let mut cont_code = windows::Win32::Foundation::DBG_CONTINUE.0 as u32;
+                let cont_code = windows::Win32::Foundation::DBG_CONTINUE;
                 self.query_working_set();
                 let ranges = self.make_ranges();
                 self.sndr.send(MessageFromDebugger::MemoryRanges(ranges));
@@ -745,18 +745,18 @@ impl DebuggerWindows {
         let mut pattr: SECURITY_ATTRIBUTES = SECURITY_ATTRIBUTES {
             nLength: mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: 0 as *mut c_void,
-            bInheritHandle: BOOL(0),
+            bInheritHandle: false.into(),
         };
         let mut tattr: SECURITY_ATTRIBUTES = SECURITY_ATTRIBUTES {
             nLength: mem::size_of::<SECURITY_ATTRIBUTES>() as u32,
             lpSecurityDescriptor: 0 as *mut c_void,
-            bInheritHandle: BOOL(0),
+            bInheritHandle: false.into(),
         };
         let envflags = 0 as *mut c_void;
 
-        let inp: HANDLE = HANDLE(0); //TODO create a handle for this CreateNamedPipeA
-        let outp: HANDLE = HANDLE(0); //TODO create a handle for this CreateNamedPipeA
-        let errp: HANDLE = HANDLE(0); //TODO create a handle for this CreateNamedPipeA
+        let inp: HANDLE = HANDLE(std::ptr::null_mut()); //TODO create a handle for this CreateNamedPipeA
+        let outp: HANDLE = HANDLE(std::ptr::null_mut()); //TODO create a handle for this CreateNamedPipeA
+        let errp: HANDLE = HANDLE(std::ptr::null_mut()); //TODO create a handle for this CreateNamedPipeA
 
         let start: STARTUPINFOA = STARTUPINFOA {
             cb: mem::size_of::<STARTUPINFOA>() as u32,
@@ -781,19 +781,19 @@ impl DebuggerWindows {
         let response = unsafe {
             windows::Win32::System::Threading::CreateProcessA(
                 PCSTR(path.as_ptr() as *const u8),
-                PSTR(0 as *mut u8),
-                &mut pattr,
-                &mut tattr,
-                BOOL(0),
+                None,
+                Some(&mut pattr),
+                Some(&mut tattr),
+                false,
                 PROCESS_CREATION_FLAGS(1),
-                envflags,
+                Some(envflags),
                 PCSTR(curdir.as_ptr() as *const u8),
                 &start,
                 &mut self.info,
             )
         };
-        println!("Response of createprocess is {}", response.as_bool());
-        if !response.as_bool() {
+        println!("Response of createprocess is {}", response.is_ok());
+        if response.is_err() {
             let err = unsafe { windows::Win32::Foundation::GetLastError() };
             println!("The error is {:?}", err);
             return;
