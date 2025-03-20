@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ffi::c_void, ffi::CString, mem, path::PathBuf};
+use std::{collections::{BTreeMap, HashMap}, ffi::{c_void, CString}, mem, path::PathBuf};
 
 use windows::{
     core::{PCSTR, PSTR},
@@ -33,6 +33,8 @@ pub type DebuggedMachine = dyn crate::debug::Debugger<Registers = X86Registers, 
 pub enum MessageToDebugger {
     Pause,
     Continue,
+    AddSwBreakpoint(u64),
+    DeleteSwBreakpoint(u64),
 }
 
 pub enum MessageFromDebugger {
@@ -261,6 +263,7 @@ pub struct DebuggerWindows {
     sndr: std::sync::mpsc::Sender<MessageFromDebugger>,
     main_thread: Option<u32>,
     extra_threads: Vec<u32>,
+    soft_breakpoints: BTreeMap<u64, u8>,
 }
 
 #[repr(align(64))]
@@ -281,6 +284,7 @@ impl DebuggerWindows {
             memory_map: Err(0),
             main_thread: None,
             extra_threads: Vec::new(),
+            soft_breakpoints: BTreeMap::new(),
         }
     }
 
@@ -678,6 +682,12 @@ impl DebuggerWindows {
                         match self.recvr.recv() {
                             Ok(m) => match m {
                                 MessageToDebugger::Pause => {}
+                                MessageToDebugger::AddSwBreakpoint(address) => {
+                                    todo!();
+                                }
+                                MessageToDebugger::DeleteSwBreakpoint(address) => {
+                                    todo!();
+                                }
                                 MessageToDebugger::Continue => {
                                     break;
                                 }

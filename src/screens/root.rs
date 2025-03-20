@@ -1,10 +1,11 @@
 use std::marker::PhantomData;
 
-use egui_glow::EguiGlow;
-use egui_multiwin::{
+use crate::egui_multiwin_dynamic::{
     multi_window::NewWindowRequest,
     tracked_window::{RedrawResponse, TrackedWindow},
 };
+use egui_multiwin::egui::FontId;
+use egui_multiwin::egui_glow::EguiGlow;
 
 use crate::{
     debug::{ReasonToPause, X86Registers},
@@ -23,42 +24,45 @@ pub struct RootWindow<T> {
 }
 
 impl RootWindow<crate::Windows> {
-    pub fn new() -> NewWindowRequest<AppCommon> {
-        NewWindowRequest {
-            window_state: Box::new(RootWindow::<crate::Windows> {
+    pub fn new() -> NewWindowRequest {
+        NewWindowRequest::new(RootWindow::<crate::Windows> {
                 button_press_count: 0,
                 num_popups_created: 0,
                 thread_selection: None,
                 memory_selection: None,
                 _d: PhantomData,
-            }),
-            builder: glutin::window::WindowBuilder::new()
+            }.into(), egui_multiwin::winit::window::WindowBuilder::new()
                 .with_resizable(true)
-                .with_inner_size(glutin::dpi::LogicalSize {
+                .with_inner_size(egui_multiwin::winit::dpi::LogicalSize {
                     width: 800.0,
                     height: 600.0,
                 })
-                .with_title("UglyOldBob Debugger"),
-        }
+                .with_title("UglyOldBob Debugger"), egui_multiwin::tracked_window::TrackedWindowOptions {
+                    vsync: false,
+                    shader: None,
+                }, egui_multiwin::multi_window::new_id())
     }
 }
 
 impl TrackedWindow for RootWindow<crate::Windows> {
-    type Data = AppCommon;
-
     fn is_root(&self) -> bool {
         true
     }
 
     fn set_root(&mut self, _root: bool) {}
 
-    fn redraw(&mut self, c: &mut AppCommon, egui: &mut EguiGlow) -> RedrawResponse<Self::Data> {
+    fn redraw( &mut self,
+        c: &mut AppCommon,
+        egui: &mut EguiGlow,
+        window: &egui_multiwin::winit::window::Window,
+        _clipboard: &mut egui_multiwin::arboard::Clipboard,
+    ) -> RedrawResponse {
         let mut quit = false;
 
         let mut windows_to_create = vec![];
 
         egui.egui_ctx.request_repaint();
-        egui::TopBottomPanel::top("menubar").show(&egui.egui_ctx, |ui| {
+        egui_multiwin::egui::TopBottomPanel::top("menubar").show(&egui.egui_ctx, |ui| {
             ui.menu_button("File", |ui| {
                 if ui.button("Open executable").clicked() {
                     let file = rfd::FileDialog::new()
@@ -78,7 +82,7 @@ impl TrackedWindow for RootWindow<crate::Windows> {
             if let Some(f) = (*d).get_thread_focus() {
                 self.thread_selection = Some(f);
             }
-            egui::TopBottomPanel::top("Command bar").show(&egui.egui_ctx, |ui| {
+            egui_multiwin::egui::TopBottomPanel::top("Command bar").show(&egui.egui_ctx, |ui| {
                 let r = ui.button("▶");
                 if r.clicked() {
                     (*d).resume_all_threads();
@@ -109,12 +113,12 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                 });
             });
 
-            egui::SidePanel::left("side panel 1").show(&egui.egui_ctx, |ui| {
-                egui::TopBottomPanel::top("threads panel")
+            egui_multiwin::egui::SidePanel::left("side panel 1").show(&egui.egui_ctx, |ui| {
+                egui_multiwin::egui::TopBottomPanel::top("threads panel")
                     .resizable(true)
                     .show_inside(ui, |ui| {
                         ui.heading("Threads");
-                        egui::ScrollArea::vertical()
+                        egui_multiwin::egui::ScrollArea::vertical()
                             .auto_shrink([false; 2])
                             .show(ui, |ui| {
                                 for (i, id) in (*d).get_all_threads().iter().enumerate() {
@@ -133,11 +137,11 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                             });
                     });
                 if let Some(ranges) = (*d).get_memory_ranges() {
-                    egui::TopBottomPanel::top("memory range panel")
+                    egui_multiwin::egui::TopBottomPanel::top("memory range panel")
                         .resizable(true)
                         .show_inside(ui, |ui| {
                             ui.heading("Memory Ranges");
-                            egui::ScrollArea::vertical()
+                            egui_multiwin::egui::ScrollArea::vertical()
                                 .auto_shrink([false; 2])
                                 .show(ui, |ui| {
                                     for (i, r) in ranges.iter().enumerate() {
@@ -158,17 +162,17 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                         });
                 }
             });
-            egui::SidePanel::right("right panel")
+            egui_multiwin::egui::SidePanel::right("right panel")
                 .resizable(true)
                 .show(&egui.egui_ctx, |ui| {
-                    egui::TopBottomPanel::top("register panel")
+                    egui_multiwin::egui::TopBottomPanel::top("register panel")
                         .resizable(true)
                         .show_inside(ui, |ui| {
                             ui.heading("Registers");
                             if let Some(threadid) = &self.thread_selection {
                                 let regs = (*d).get_registers(*threadid);
                                 if let Some(r) = regs {
-                                    egui::ScrollArea::vertical().auto_shrink([false; 2]).show(
+                                    egui_multiwin::egui::ScrollArea::vertical().auto_shrink([false; 2]).show(
                                         ui,
                                         |ui| match r {
                                             X86Registers::Bits32(r) => {
@@ -225,7 +229,7 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                             }
                         });
                 });
-            egui::CentralPanel::default().show(&egui.egui_ctx, |ui| {
+                egui_multiwin::egui::CentralPanel::default().show(&egui.egui_ctx, |ui| {
                 if let Some(threadid) = &self.thread_selection {
                     let regs = (*d).get_registers(*threadid);
                     if let Some(r) = regs {
@@ -233,7 +237,7 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                     }
                 }
                 if let Some(mi) = self.memory_selection {
-                    egui::TopBottomPanel::bottom("memory view")
+                    egui_multiwin::egui::TopBottomPanel::bottom("memory view")
                         .resizable(true)
                         .show_inside(ui, |ui| {
                             ui.horizontal(|ui| {
@@ -246,7 +250,7 @@ impl TrackedWindow for RootWindow<crate::Windows> {
                 }
             });
         } else {
-            egui::CentralPanel::default().show(&egui.egui_ctx, |ui| {});
+            egui_multiwin::egui::CentralPanel::default().show(&egui.egui_ctx, |ui| {});
         }
 
         RedrawResponse {
